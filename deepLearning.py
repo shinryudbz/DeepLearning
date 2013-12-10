@@ -48,11 +48,12 @@ class BaseTable:
 
     # the math to do perform the percentile for a given sorted and reversed
     # array and its corresponding length, along with the element to search for.
-    def calculateNearestPercentile(self, array, elementToSearch, lengthOfArray):
-        percentile = (lengthOfArray - array.index(elementToSearch))/lengthOfArray
+    def calculateNearestPercentile(self, array, elementToSearch, lengthOfArray, fieldName):
+        elementIndex = float(array.index(elementToSearch))
+        percentile = (lengthOfArray - elementIndex)/lengthOfArray
         percentile = round(10*percentile)*10
 
-        return str(percentile) + "_percentile"
+        return fieldName + "_" + str(percentile) + "_percentile"
 
     # loads the data for a given fileName and indexes it by the elementId
     def loadFileDictionary(self, fileName, elementId):
@@ -186,23 +187,23 @@ class UserTable(BaseTable):
         if field == "review_count":
             return BaseTable.calculateNearestPercentile(self,
                 self.userReviewCount, element["review_count"],
-                self.lengthUserReviewCount)
+                self.lengthUserReviewCount, "review_count")
         elif field == "average_stars":
             return BaseTable.calculateNearestPercentile(self,
                 self.userAverageStars, element["average_stars"],
-                self.lengthUserAvgStars)
+                self.lengthUserAvgStars, "average_stars")
         elif field == "votes|cool":
             return BaseTable.calculateNearestPercentile(self,
                 self.userVotesCool, element["votes"]["cool"],
-                self.lengthUserVotesCool)
+                self.lengthUserVotesCool, "votes_cool")
         elif field == "votes|funny":
             return BaseTable.calculateNearestPercentile(self,
                 self.userVotesFunny, element["votes"]["funny"],
-                self.lengthUserVotesFunny)
+                self.lengthUserVotesFunny, "votes_funny")
         elif field == "votes|useful":
             return BaseTable.calculateNearestPercentile(self,
                 self.userVotesUseful, element["votes"]["useful"],
-                self.lengthUserVotesUseful)
+                self.lengthUserVotesUseful, "votes_useful")
         else:
             return None
 
@@ -282,14 +283,15 @@ class BusinessTable(BaseTable):
         if field == "review_count":
             return BaseTable.calculateNearestPercentile(self,
                 self.businessReviewCount, element["review_count"],
-                self.lengthBusinessReviewCount)
+                self.lengthBusinessReviewCount, "review_count")
         elif field == "latitude":
             return BaseTable.calculateNearestPercentile(self,
-                self.businessLat, element["latitude"], self.lengthBusinessLat)
+                self.businessLat, element["latitude"], self.lengthBusinessLat,
+                "latitude")
         elif field == "longitude":
             return BaseTable.calculateNearestPercentile(self,
                 self.businessLong, element["longitude"],
-                self.lengthBusinessLong)
+                self.lengthBusinessLong, "longitude")
         else:
             return None
 
@@ -375,15 +377,15 @@ class ReviewTable(BaseTable):
         elif field == "votes|cool":
             return BaseTable.calculateNearestPercentile(self,
                 self.reviewVotesCool, element["votes"]["cool"],
-                self.lengthReviewVotesCool)
+                self.lengthReviewVotesCool, "votes_cool")
         elif field == "votes|funny":
             return BaseTable.calculateNearestPercentile(self,
                 self.reviewVotesFunny, element["votes"]["funny"],
-                self.lengthReviewVotesFunny)
+                self.lengthReviewVotesFunny, "votes_funny")
         elif field == "votes|useful":
             return BaseTable.calculateNearestPercentile(self,
                 self.reviewVotesUseful, element["votes"]["useful"],
-                self.lengthReviewVotesUseful)
+                self.lengthReviewVotesUseful, "votes_useful")
         else:
             return None
 
@@ -484,6 +486,7 @@ class FeatureGenerator:
             # we keep appending the feature vectors for each review
             # to train later
             features.append(reviewFeature)
+            #print reviewFeature
             #print "len: " + str(len(reviewFeature))
 
         time_end = time.time()
@@ -503,13 +506,13 @@ class FeatureGenerator:
         return pointCloud
 
 if __name__ == '__main__':
-    #userFile = "C:\\Users\\Upal Hasan\\Desktop\\yelp_data\\yelp_phoenix_academic_dataset\\yelp_academic_dataset_user.json"
-    #businessFile = "C:\\Users\\Upal Hasan\\Desktop\\yelp_data\\yelp_phoenix_academic_dataset\\yelp_academic_dataset_business.json"
-    #reviewFile = "C:\\Users\\Upal Hasan\\Desktop\\yelp_data\\yelp_phoenix_academic_dataset\\yelp_academic_dataset_review.json"
+    userFile = "C:\\Users\\Upal Hasan\\Desktop\\yelp_data\\yelp_phoenix_academic_dataset\\yelp_academic_dataset_user.json"
+    businessFile = "C:\\Users\\Upal Hasan\\Desktop\\yelp_data\\yelp_phoenix_academic_dataset\\yelp_academic_dataset_business.json"
+    reviewFile = "C:\\Users\\Upal Hasan\\Desktop\\yelp_data\\yelp_phoenix_academic_dataset\\yelp_academic_dataset_review.json"
 
-    reviewFile = "C:\\Users\\Upal Hasan\\Desktop\\yelp_data\\json.txt"
-    businessFile = "C:\\Users\\Upal Hasan\\Desktop\\yelp_data\\json1.txt"
-    userFile = "C:\\Users\\Upal Hasan\\Desktop\\yelp_data\\json2.txt"
+    #reviewFile = "C:\\Users\\Upal Hasan\\Desktop\\yelp_data\\json.txt"
+    #businessFile = "C:\\Users\\Upal Hasan\\Desktop\\yelp_data\\json1.txt"
+    #userFile = "C:\\Users\\Upal Hasan\\Desktop\\yelp_data\\json2.txt"
 
     modelPath = "C:\\Users\\Upal Hasan\\Desktop\\deepLearning\\model\\model.out"
     wgtMatrixPath = "C:\\Users\\Upal Hasan\\Desktop\\deepLearning\\model\\wgt.out"
@@ -535,13 +538,13 @@ if __name__ == '__main__':
     # we are not providing any arguments, so we want to use all the data points
     sentences = generator.generateFeatureVectors()
 
-    print sentences
+    #print sentences
 
-    '''print "Training model..."
+    print "Training model..."
     model = Word2Vec(sentences, size=100, window=5, min_count=5, workers=4)
     model.save(modelPath)
     model.save_word2vec_format(wgtMatrixPath)
 
-    pointCloud = generator.generatePointCloud(model, sentences)
+    #pointCloud = generator.generatePointCloud(model, sentences)
     #print "len: " + str(len(pointCloud))
-    '''
+
