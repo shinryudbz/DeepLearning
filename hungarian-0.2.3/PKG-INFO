@@ -1,0 +1,12 @@
+Metadata-Version: 1.0
+Name: hungarian
+Version: 0.2.3
+Summary: algorithm for the linear assignment problem
+Home-page: http://github.com/hrldcpr/hungarian
+Author: Harold Cooper
+Author-email: hrldcpr@gmail.com
+License: UNKNOWN
+Description: This module is just a simple wrapper for a C++ implementation of Knuth's
+        Hungarian algorithm, a.k.a. Munkres' algorithm, for the linear assignment
+        problem.
+Platform: UNKNOWN
