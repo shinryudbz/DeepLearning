@@ -45,8 +45,7 @@ def compare_docs(sentenceA, sentenceB, model):
 		total += model.similarity(shorter[i], longer[matches[i]])
 	return total
 
-
-def run_search(doc, dataset, numResults, fieldsToCompare):
+def run_search(doc, dataset, schema, fieldsToCompare, numResults):
 	docA = convert_json_to_sentence(doc,fieldsToCompare);
 	
 	# build a search queue using heapq
@@ -67,7 +66,7 @@ def run_search(doc, dataset, numResults, fieldsToCompare):
 		ret.append(heapq.heappop(heap)[1])
 	return ret
 
-
+#  schema = {"name" : "review_count", "type" : "numeric", "percentiles":[1,23,3,44,88,99,100...10]}
 
 if __name__ == '__main__':
 	print "Loading Model"
