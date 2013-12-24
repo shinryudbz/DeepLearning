@@ -5,7 +5,7 @@ import heapq
 
 
 
-def convert_json_to_sentence(doc, fieldsToCompare):
+def convert_json_to_sentence(doc, schema, fieldsToCompare):
 	#TODO
 	return ["review_count_90.0_percentile", "votes_cool_80.0_percentile", "love"];
 
@@ -46,14 +46,14 @@ def compare_docs(sentenceA, sentenceB, model):
 	return total
 
 def run_search(doc, dataset, schema, fieldsToCompare, numResults):
-	docA = convert_json_to_sentence(doc,fieldsToCompare);
+	docA = convert_json_to_sentence(doc, schema, fieldsToCompare);
 	
 	# build a search queue using heapq
 	heap = []
 	
 	# scan through dataset
 	for docToCompare in dataset:
-		docB = convert_json_to_sentence(docToCompare, fieldsToCompare)
+		docB = convert_json_to_sentence(docToCompare, schema, fieldsToCompare)
 		score = compare_docs(docA, docB,)
 		heapq.heappush(heap, (score,docB))
 
