@@ -5,9 +5,31 @@ import heapq
 
 
 
+def compute_percentile(value, cutoffs):
+	if value < cutoffs[0]:
+		return 0.0
+
+	for i, cutoff in enumerate(cutoffs):
+		if value < cutoff:
+			return 100 * (float(i)/(len(cutoffs)))
+			break
+	return 100.0
+
 def convert_json_to_sentence(doc, schema, fieldsToCompare):
-	#TODO
-	return ["review_count_90.0_percentile", "votes_cool_80.0_percentile", "love"];
+	sentence = []
+	for field in fieldsToCompare:
+		if(not field in schema):
+			print "Invalid field specified : " + field + " .... skipping"
+			continue
+
+		else:
+			fieldMetaData = schema[field]
+			if(fieldMetaData["type"] is "string"):
+				sentence += doc[field]
+			else:
+				# compute the percentile and create a word:
+				sentence += [field + "_"+ str(compute_percentile(doc[field], fieldMetaData["percentile"])) + "_percentile"];
+	return sentence
 
 # Document comparison algorithm
 # Given  documents A,B and |A|<|B|
@@ -70,6 +92,14 @@ def run_search(doc, dataset, schema, fieldsToCompare, numResults):
 
 if __name__ == '__main__':
 	print "Loading Model"
+
+	# percentile array contains:
+	#  [10th percentile start, 20th percentile start ... 90th percentile start, 100th percentile start]
+	# example:
+	print compute_percentile( 99, [10, 20, 30, 40, 50, 60, 70, 80, 90, 100])
+	
+
+	"""
 	model =  Word2Vec.load_word2vec_format('model/wgt.out', binary=False)
 	print "Done"
 	#print model.most_similar(positive=['review_count_90.0_percentile'], topn=100)
@@ -82,3 +112,4 @@ if __name__ == '__main__':
 	compare_docs(wordsA, wordsB, model)
 
 
+"""
