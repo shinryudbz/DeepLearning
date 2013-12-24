@@ -1,6 +1,6 @@
 from gensim.models.word2vec import *
 import hungarian
-
+import heapq
 
 
 
@@ -48,14 +48,25 @@ def compare_docs(sentenceA, sentenceB, model):
 
 def run_search(doc, dataset, numResults, fieldsToCompare):
 	docA = convert_json_to_sentence(doc,fieldsToCompare);
-	# build a search queue
+	
+	# build a search queue using heapq
+	heap = []
+	
 	# scan through dataset
 	for docToCompare in dataset:
 		docB = convert_json_to_sentence(docToCompare, fieldsToCompare)
 		score = compare_docs(docA, docB,)
-		# push docB with score onto priority queue
-		
-		
+		heapq.heappush(heap, (score,docB))
+
+		# pop the lowest score if we've gotten too many items
+		if len(heap) > numResults:
+			heapq.heappop(heap)
+	
+	ret = []
+	for i in xrange(0, numResults):
+		ret.append(heapq.heappop(heap)[1])
+	return ret
+
 
 
 if __name__ == '__main__':
@@ -64,7 +75,11 @@ if __name__ == '__main__':
 	print "Done"
 	#print model.most_similar(positive=['review_count_90.0_percentile'], topn=100)
 
+	# TODO: Load dataset in to json
+	
+
 	sentenceA = ["review_count_90.0_percentile", "food", "love"];
 	sentenceB = ["review_count_90.0_percentile", "phoenix", "food", "blah", "love"]
 	compare_docs(wordsA, wordsB, model)
+
 
