@@ -18,6 +18,8 @@ FIELD_TYPE_TEXT = "text"
 STEMMER = PorterStemmer()
 
 
+### Functions for computing percentiles on a single value or over an entire schema ####
+
 def compute_percentile(value, cutoffs):
 	"""
 	Given a value and a set of cutoffs returns the percentile within which the value lies
@@ -33,35 +35,6 @@ def compute_percentile(value, cutoffs):
 			return 100 * (float(i)/(len(cutoffs)))
 			break
 	return 100.0
-
-def read_csv_as_key_values(csv_path, callback, updateStr = None, updateModulo = 1000):
-	"""
-	Reads in the csv at csv_path. The first row is assumed to be keys 
-	callback is called with a dictionary with keys corresponding to column names 
-	and strings contianing values
-	:param csv_path: the path to the csv file
-	:param callback: a function taking in a single parameter (dictionary of key values for the row)
-	:param updateStr: (optional) a string that will display as the file reads each row
-	:param updateModulo: (optional) the number of rows to skip before showing the message
-	"""
-	fields = None
-	num = 0
-	with open(csv_path, 'rU') as csvfile:
-		reader = csv.reader(csvfile, delimiter=',', quotechar='"')
-		for row in reader:
-			if not fields:
-				fields = {}
-				for i, field in enumerate(row):
-					fields[field] = i
-			else:
-				keyValue = {}
-				for field in fields:
-					value = row[fields[field]]
-					keyValue[field] = value
-				callback(keyValue)
-				num += 1
-				if (updateStr and num % updateModulo == 0):
-					print updateStr + " " + str(num)
 
 def compute_schema_percentiles(schema):
 	"""
@@ -101,6 +74,78 @@ def compute_schema_percentiles(schema):
 	schema["fields"] = schemaFields
 	return schema
 
+### Functions for reading csv format data ####
+
+def read_csv_as_key_values(csv_path, callback, updateStr = None, updateModulo = 1000):
+	"""
+	Reads in the csv at csv_path. The first row is assumed to be keys 
+	callback is called with a dictionary with keys corresponding to column names 
+	and strings contianing values
+	:param csv_path: the path to the csv file
+	:param callback: a function taking in a single parameter (dictionary of key values for the row)
+	:param updateStr: (optional) a string that will display as the file reads each row
+	:param updateModulo: (optional) the number of rows to skip before showing the message
+	"""
+	fields = None
+	num = 0
+	with open(csv_path, 'rU') as csvfile:
+		reader = csv.reader(csvfile, delimiter=',', quotechar='"')
+		for row in reader:
+			if not fields:
+				fields = {}
+				for i, field in enumerate(row):
+					fields[field] = i
+			else:
+				keyValue = {}
+				for field in fields:
+					value = row[fields[field]]
+					keyValue[field] = value
+				callback(keyValue)
+				num += 1
+				if (updateStr and num % updateModulo == 0):
+					print updateStr + " " + str(num)
+
+
+### Functions for reading and writing sentences from a schema ####
+
+def read_sentences(schema, callback, update_message=None):
+	"""
+	Reads the sentences for the given schema and passes them back to the callback function
+	in the object given to the callback each field (key) maps to a set of sentences
+	:param schema: the dataset schemaFields
+	:param callback: the function which receives the sentences read
+	"""
+	with open(sentence_file_path(schema), "r") as f:
+		i = 0
+		while True:
+			l = f.readline()
+			i = i+1
+			if not l:
+				break
+			callback(json.loads(l.rstrip()))
+			if(update_message and i%1000 == 0):
+				print update_message + " " +  str(i)
+
+
+
+def build_sentences(schema):
+	"""
+	Generates a sentence file for the schema. 
+	:param schema: the dataset schema
+	"""
+	with open(sentence_file_path(schema), "w") as output:
+		def processKeyValue(keyValue, output, schema):
+			sentencesByKey = {}
+			for key in keyValue:
+				words = generate_field_features(schema, key, keyValue[key])
+				if(len(words)):
+					sentencesByKey[key] = words
+			output.write(json.dumps(sentencesByKey)+"\n")
+			
+		read_csv_as_key_values(schema["dataset_path"], lambda x : processKeyValue(x, output, schema), "reading")
+
+### functions for getting paths for various generated files from within the schema ###
+
 def model_path(schema):
 	return os.path.join(os.path.dirname(schema["dataset_path"]), os.path.basename(schema["dataset_path"].split(".")[0] + "_model.out"))
 
@@ -110,6 +155,92 @@ def weight_matrix_path(schema):
 def sentence_file_path(schema):
 	return os.path.join(os.path.dirname(schema["dataset_path"]), os.path.basename(schema["dataset_path"].split(".")[0] + "_sentences.out"))
 
+
+### functions for manipulating a piece of raw data into sentences ###
+def convert_key_value_to_sentence(schema, keyValues, fieldsToRead):
+	"""
+	Given a set of raw key values read from base data returns a sentence which can be fed to a Word2Vec model
+	:param schema: dataset schema
+	:param keyValues: the key values (read from a csv) to convert to sentences
+	:param fieldsToRead: the keys to actually read (others will be ignored)
+	:return a sentence usable by a Word2Vec model
+	"""
+	features = []
+	for field in fieldsToRead:
+		value = keyValues[field]
+		features += generate_field_features(schema,field, value)
+	return features
+
+
+def merge_sentences_to_single_sentence(keyValue, fieldsToRead):
+	"""
+	Given a keyValue where values are already sentences (keyed by field) it converts
+	the input into a single sentence by pulling fields from fieldsToRead
+	:param keyValue: the map from fields to sentences
+	:param fieldsToRead: the set of keys to actually useable
+	:return a single sentences with fields from fieldsToRead
+	"""
+	ret = []
+	for field in fieldsToRead:
+		if(field in keyValue):
+			ret +=  keyValue[field]
+	return ret
+
+def generate_field_features(schema, field, value):
+	"""
+	Given a field value converts it to a sentence that is useable by the model
+	:param schema: dataset schema
+	:param field: fieldname in the schema for value
+	:param value: actual raw value
+	:return a sentence usable by a Word2Vec model
+	"""
+	if not field in schema["fields"]:
+		return []
+
+	global STEMMER
+	if(schema["fields"][field]["type"] == FIELD_TYPE_NUMERIC):
+		return [field + "_" + str(compute_percentile(float(value), schema["fields"][field]["percentile"]))+"_percentile", field+"_"+str(value)+"_value"]
+	else:
+		rawWords = map(lambda x : STEMMER.stem(x.lower()) , nltk.word_tokenize(value))
+		featuresNonUnicode = []
+		for word in rawWords:
+			try:
+				raw = word.encode('ascii', 'ignore')
+				featuresNonUnicode.append(raw)
+			except:
+				continue
+		return featuresNonUnicode
+
+
+### methods for training a model ###
+def train_model(schema, vectorSize, fieldsToRead = None):
+	"""
+	Given a schema and vectorSize trains the model.
+	:param schema: dataset schema
+	:param vectorSize: size of feature vectors to generate
+	:param fieldsToRead: the keys to actually train on (others will be ignored)
+	:return a Word2Vec model
+	"""
+	if not fieldsToRead:
+		fieldsToRead = schema["fields"].keys()
+
+	sentences = []
+	# build sentences:
+	print "Building Feature vectors..."
+
+	read_sentences(schema, lambda x : sentences.append(merge_sentences_to_single_sentence(x, fieldsToRead)))
+	print "Read " + str(len(sentences)) + " documents"
+	print "Training Model..."
+	modelPath = model_path(schema)
+	weightMatrixPath = weight_matrix_path(schema)
+	model = Word2Vec(sentences, size=vectorSize, window=5, min_count=5, workers=4)
+	model.save(modelPath)
+	model.save_word2vec_format(weightMatrixPath)
+	print "Finished training"
+	return model
+
+
+## method for comparing and searching documents
 
 CMP_TIME = 0
 def compare_docs(sentenceA, sentenceB, model, similarityCache, worstInQueue):
@@ -208,7 +339,7 @@ def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, fieldsToComp
 	worst = { "value" : None }
 	# scan through dataset
 	def compareValue(docPositive, docNegative, docToCompare, heap, model, fieldsToCompare, similarityCache, worst):
-		docToCompareFiltered = keys_to_single_sentence(docToCompare, fieldsToCompare)
+		docToCompareFiltered = merge_sentences_to_single_sentence(docToCompare, fieldsToCompare)
 		score = compare_docs(docPositive, docToCompareFiltered, model, similarityCache, worst["value"])
 		if(docNegative):
 			score -= compare_docs(docNegative, docToCompareFiltered, model, similarityCache, worst["value"])
@@ -226,150 +357,37 @@ def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, fieldsToComp
 	ret.reverse()
 	return ret
 
-def generate_field_features(schema, field, value):
-	"""
-	Given a field value converts it to a sentence that is useable by the model
-	:param schema: dataset schema
-	:param field: fieldname in the schema for value
-	:param value: actual raw value
-	:return a sentence usable by a Word2Vec model
-	"""
-	if not field in schema["fields"]:
-		return []
 
-	global STEMMER
-	if(schema["fields"][field]["type"] == FIELD_TYPE_NUMERIC):
-		return [field + "_" + str(compute_percentile(float(value), schema["fields"][field]["percentile"]))+"_percentile", field+"_"+str(value)+"_value"]
-	else:
-		rawWords = map(lambda x : STEMMER.stem(x.lower()) , nltk.word_tokenize(value))
-		featuresNonUnicode = []
-		for word in rawWords:
-			try:
-				raw = word.encode('ascii', 'ignore')
-				featuresNonUnicode.append(raw)
-			except:
-				continue
-		return featuresNonUnicode
+if __name__ == '__main__':
+	json_data = open(sys.argv[1]).read()
+	schema = json.loads(json_data)
+	schema = compute_schema_percentiles(schema)
 
-def convert_key_value_to_sentence(schema, keyValues, fieldsToRead):
-	"""
-	Given a set of key values returns a sentence which can be fed to a Word2Vec model
-	:param schema: dataset schema
-	:param keyValues: the key values to convert to sentences
-	:param fieldsToRead: the keys to actually read (others will be ignored)
-	:return a sentence usable by a Word2Vec model
-	"""
-	features = []
-	for field in fieldsToRead:
-		value = keyValues[field]
-		features += generate_field_features(schema,field, value)
-	return features
+	# check if sentence dump has been created:
+	try:
+		open(sentence_file_path(schema), "r")
+	except:
+		# build sentence dump if load fails:
+		build_sentences(schema)
 
-def build_sentences(schema):
-	"""
-	Generates a sentence file for the schema. 
-	:param schema: the dataset schema
-	"""
-	with open(sentence_file_path(schema), "w") as output:
-		def processKeyValue(keyValue, output, schema):
-			sentencesByKey = {}
-			for key in keyValue:
-				words = generate_field_features(schema, key, keyValue[key])
-				if(len(words)):
-					sentencesByKey[key] = words
-			output.write(json.dumps(sentencesByKey)+"\n")
-			
-		read_csv_as_key_values(schema["dataset_path"], lambda x : processKeyValue(x, output, schema), "reading")
-
-def read_sentences(schema, callback, update_message=None):
-	"""
-	Reads the sentences for the given schema and passes them back to the callback function
-	in the object given to the callback each field (key) maps to a set of sentences
-	:param schema: the dataset schemaFields
-	:param callback: the function which receives the sentences read
-	"""
-	with open(sentence_file_path(schema), "r") as f:
-		i = 0
-		while True:
-			l = f.readline()
-			i = i+1
-			if not l:
-				break
-			callback(json.loads(l.rstrip()))
-			if(update_message and i%1000 == 0):
-				print update_message + " " +  str(i)
-
-def keys_to_single_sentence(keyValue, fieldsToRead):
-	"""
-	Given a keyValue where values are sentences it converts
-	the input into a single sentence by pulling fields from fieldsToRead
-	:param keyValue: the map from fields to sentences
-	:param fieldsToRead: the set of keys to actually useable
-	:return a single sentences with fields from fieldsToRead
-	"""
-	ret = []
-	for field in fieldsToRead:
-		if(field in keyValue):
-			ret +=  keyValue[field]
-	return ret
-
-def train_model(schema, vectorSize, fieldsToRead = None):
-	"""
-	Given a schema and vectorSize trains the model.
-	:param schema: dataset schema
-	:param vectorSize: size of feature vectors to generate
-	:param fieldsToRead: the keys to actually train on (others will be ignored)
-	:return a Word2Vec model
-	"""
-	if not fieldsToRead:
-		fieldsToRead = schema["fields"].keys()
-
-	sentences = []
-	# build sentences:
-	print "Building Feature vectors..."
-
-	read_sentences(schema, lambda x : sentences.append(keys_to_single_sentence(x, fieldsToRead)))
-	print "Read " + str(len(sentences)) + " documents"
-	print "Training Model..."
-	modelPath = model_path(schema)
-	weightMatrixPath = weight_matrix_path(schema)
-	model = Word2Vec(sentences, size=vectorSize, window=5, min_count=5, workers=4)
-	model.save(modelPath)
-	model.save_word2vec_format(weightMatrixPath)
-	print "Finished training"
-	return model
+	# check if model has been trained:
+	try:
+		# try loading model
+		model =  Word2Vec.load_word2vec_format(weight_matrix_path(schema), binary=False)
+	except:
+		# otherwise compute it:
+		model = train_model(schema, 50)
 
 
+	# run the point cloud search:
+	start1 = time.time();
+	ret = run_point_cloud_search(["Reported_Minimum_100.0_percentile","children","child"], ["bomb", "car"], schema, model)
+	start2 = time.time();
+	print "Compare Docs Time"
+	print CMP_TIME
 
-json_data = open(sys.argv[1]).read()
-schema = json.loads(json_data)
-schema = compute_schema_percentiles(schema)
-
-# check if sentence dump has been created:
-try:
-	open(sentence_file_path(schema), "r")
-except:
-	# build sentence dump if load fails:
-	build_sentences(schema)
-
-# check if model has been trained:
-try:
-	# try loading model
-	model =  Word2Vec.load_word2vec_format(weight_matrix_path(schema), binary=False)
-except:
-	# otherwise compute it:
-	model = train_model(schema, 50)
-
-
-# run the point cloud search:
-start1 = time.time();
-ret = run_point_cloud_search(["Reported_Minimum_100.0_percentile","children","child"], ["bomb", "car"], schema, model)
-start2 = time.time();
-print "Compare Docs Time"
-print CMP_TIME
-
-print "Total Time"
-print str(start2-start1)
+	print "Total Time"
+	print str(start2-start1)
 
 """
 xs = []
