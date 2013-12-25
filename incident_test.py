@@ -111,13 +111,8 @@ def sentence_file_path(schema):
 	return os.path.join(os.path.dirname(schema["dataset_path"]), os.path.basename(schema["dataset_path"].split(".")[0] + "_sentences.out"))
 
 
-HUNG_TIME = 0
-MAT_TIME = 0
-SIMILARITY_TIME = 0
+CMP_TIME = 0
 def compare_docs(sentenceA, sentenceB, model, similarityCache, worstInQueue):
-	global HUNG_TIME
-	global MAT_TIME
-	global SIMILARITY_TIME
 	"""
 	Document comparison algorithm
 	Given  documents A,B and |A|<|B|
@@ -128,55 +123,56 @@ def compare_docs(sentenceA, sentenceB, model, similarityCache, worstInQueue):
 	:param model: a Word2Vec model
 	:return sum of weights as score
 	"""
-	n = max(len(sentenceA), len(sentenceB))
+	global CMP_TIME
+	MAX_VAL = 999999
+	start = time.time()
+	lA = len(sentenceA)
+	n = max(lA, len(sentenceB))
 
-	if(len(sentenceA) < n):
+	if(lA < n):
 		shorter = sentenceA
 		longer = sentenceB
 	else:
 		shorter = sentenceB
 		longer = sentenceA
+	
+	lS = len(shorter)
 
 	# compute distance matrix from A => B
 	mat =  np.zeros((n, n))
+	mat.fill(MAX_VAL)
 	mostSimilar = None
-	for i in xrange(0, n):
+
+	for i in xrange(0, lS):
 		for j in xrange(0,n):
-			if(i >= len(shorter)):
-				mat[i][j] = 99999
+			key = (shorter[i], longer[j])
+			similarityVal = None
+			if(not key in similarityCache):
+				try:
+					similarityVal = model.similarity(shorter[i], longer[j])
+				except:
+					similarityVal = MAX_VAL
+				similarityCache[key] = similarityVal
 			else:
-				mstart = time.time()
-				key = (shorter[i], longer[j])
-				similarityVal = None
-				if(not key in similarityCache):
-					try:
-						similarityVal = model.similarity(shorter[i], longer[j])
-					except:
-						similarityVal = 99999
-					similarityCache[key] = similarityVal
-				else:
-					similarityVal = similarityCache[key]
-				if (not mostSimilar or similarityVal > mostSimilar):
-					mostSimilar = similarityVal;
-				mend = time.time()
-				SIMILARITY_TIME += mend-mstart
-				mat[i][j] = abs(1.0 / similarityVal)
+				similarityVal = similarityCache[key]
+			if (not mostSimilar or similarityVal > mostSimilar):
+				mostSimilar = similarityVal;
+			mat[i][j] = abs(1.0 / similarityVal)
+
 	# early abort hungarian if there is no way we are in the top k:
 	if(mostSimilar and mostSimilar * len(shorter) < worstInQueue):
 		return -1
 
 	# run hungarian algorithm on cost matrix
-	
-	MAT_TIME +=(end-start)
-	start = time.time()
 	matches = hungarian.lap(mat)[0]
-	end = time.time()
-	HUNG_TIME +=(end-start)
+	
 	# sum over minimal distance matching
 	total = 0
 	for i in xrange(0, len(shorter)):
 		key = (shorter[i], longer[matches[i]])
 		total += similarityCache[key];
+	end = time.time()
+	CMP_TIME +=(end-start)
 	return total
 
 def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, fieldsToCompare = None, numResults = 100):
@@ -364,13 +360,15 @@ except:
 
 
 # run the point cloud search:
+start1 = time.time();
 ret = run_point_cloud_search(["Reported_Minimum_100.0_percentile","children","child"], ["bomb", "car"], schema, model)
-print "Hungarian algorithm time"
-print HUNG_TIME
-print "Similarity matrix computation time"
-print MAT_TIME
-print "Similarity computation time"
-print SIMILARITY_TIME
+start2 = time.time();
+print "Compare Docs Time"
+print CMP_TIME
+
+print "Total Time"
+print str(start2-start1)
+
 """
 xs = []
 ys = []
