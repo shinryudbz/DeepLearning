@@ -106,6 +106,9 @@ def model_path(schema):
 def weight_matrix_path(schema):
 	return os.path.join(os.path.dirname(schema["dataset_path"]), os.path.basename(schema["dataset_path"].split(".")[0] + "_weight.out"))
 
+def sentence_file_path(schema):
+	return os.path.join(os.path.dirname(schema["dataset_path"]), os.path.basename(schema["dataset_path"].split(".")[0] + "_sentences.out"))
+
 
 
 def compare_docs(sentenceA, sentenceB, model):
@@ -181,17 +184,17 @@ def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, fieldsToComp
 	heap = []
 	
 	# scan through dataset
-	def compareValue(docPositive, docNegative, docToCompare, heap, schema, fieldsToCompare, model):
-		docB = convert_key_value_to_sentence(schema, docToCompare, fieldsToCompare)
-		score = compare_docs(docPositive, docB, model)
+	def compareValue(docPositive, docNegative, docToCompare, heap, model, fieldsToCompare):
+		docToCompareFiltered = keys_to_single_sentence(docToCompare, fieldsToCompare)
+		score = compare_docs(docPositive, docToCompareFiltered, model)
 		if(docNegative):
-			score -= compare_docs(docNegative, docB, model)
+			score -= compare_docs(docNegative, docToCompareFiltered, model)
 		heapq.heappush(heap, (score,docToCompare))
 		# pop the lowest score if we've gotten too many items
 		if len(heap) > numResults:
 			heapq.heappop(heap)
 
-	read_csv_as_key_values(schema["dataset_path"], lambda x : compareValue(docPositive, docNegative, x, heap, schema, fieldsToCompare, model), "Searching...")
+	read_sentences(schema, lambda x : compareValue(docPositive, docNegative, x, heap, model, fieldsToCompare))
 	ret = []
 	for i in xrange(0, numResults):
 		ret.append(heapq.heappop(heap))
@@ -206,11 +209,22 @@ def generate_field_features(schema, field, value):
 	:param value: actual raw value
 	:return a sentence usable by a Word2Vec model
 	"""
+	if not field in schema["fields"]:
+		return []
+
 	global STEMMER
 	if(schema["fields"][field]["type"] == FIELD_TYPE_NUMERIC):
 		return [field + "_" + str(compute_percentile(float(value), schema["fields"][field]["percentile"]))+"_percentile", field+"_"+str(value)+"_value"]
 	else:
-		return map(lambda x : STEMMER.stem(x.lower()) , nltk.word_tokenize(value))
+		rawWords = map(lambda x : STEMMER.stem(x.lower()) , nltk.word_tokenize(value))
+		featuresNonUnicode = []
+		for word in rawWords:
+			try:
+				raw = word.encode('ascii', 'ignore')
+				featuresNonUnicode.append(raw)
+			except:
+				continue
+		return featuresNonUnicode
 
 def convert_key_value_to_sentence(schema, keyValues, fieldsToRead):
 	"""
@@ -224,14 +238,34 @@ def convert_key_value_to_sentence(schema, keyValues, fieldsToRead):
 	for field in fieldsToRead:
 		value = keyValues[field]
 		features += generate_field_features(schema,field, value)
-	featuresNonUnicode = []
-	for feature in features:
-		try:
-			raw = feature.encode('ascii', 'ignore')
-			featuresNonUnicode.append(raw)
-		except:
-			continue
-	return featuresNonUnicode
+	return features
+
+def build_sentences(schema):
+	with open(sentence_file_path(schema), "w") as output:
+		def processKeyValue(keyValue, output, schema):
+			sentencesByKey = {}
+			for key in keyValue:
+				words = generate_field_features(schema, key, keyValue[key])
+				if(len(words)):
+					sentencesByKey[key] = words
+			output.write(json.dumps(sentencesByKey)+"\n")
+			
+		read_csv_as_key_values(schema["dataset_path"], lambda x : processKeyValue(x, output, schema), "reading")
+
+def read_sentences(schema, callback):
+	with open(sentence_file_path(schema), "r") as f:
+		while True:
+			l = f.readline()
+			if not l:
+				break
+			callback(json.loads(l.rstrip()))
+
+def keys_to_single_sentence(keyValue, fieldsToRead):
+	ret = []
+	for field in fieldsToRead:
+		if(field in keyValue):
+			ret +=  keyValue[field]
+	return ret
 
 def train_model(schema, vectorSize, fieldsToRead = None):
 	"""
@@ -247,9 +281,9 @@ def train_model(schema, vectorSize, fieldsToRead = None):
 	sentences = []
 	# build sentences:
 	print "Building Feature vectors..."
-	csv_path = schema["dataset_path"]
-	read_csv_as_key_values(csv_path, lambda x : sentences.append(convert_key_value_to_sentence(schema, x, fieldsToRead)), "Built")
-	print "Generated " + str(len(sentences)) + " documents"
+
+	read_sentences(schema, lambda x : sentences.append(keys_to_single_sentence(x, fieldsToRead)))
+	print "Read " + str(len(sentences)) + " documents"
 	print "Training Model..."
 	modelPath = model_path(schema)
 	weightMatrixPath = weight_matrix_path(schema)
@@ -260,10 +294,19 @@ def train_model(schema, vectorSize, fieldsToRead = None):
 	return model
 
 
+
 json_data = open(sys.argv[1]).read()
 schema = json.loads(json_data)
 schema = compute_schema_percentiles(schema)
 
+# check if sentence dump has been created:
+try:
+	open(sentence_file_path(schema), "r")
+except:
+	# build sentence dump if load fails:
+	build_sentences(schema)
+
+# check if model has been trained:
 try:
 	# try loading model
 	model =  Word2Vec.load_word2vec_format(weight_matrix_path(schema), binary=False)
@@ -271,6 +314,8 @@ except:
 	# otherwise compute it:
 	model = train_model(schema, 50)
 
+
+# run the point cloud search:
 ret = run_point_cloud_search(["Reported_Minimum_100.0_percentile","children","child"], ["bomb", "car"], schema, model)
 for r in ret:
 	print r
