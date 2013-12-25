@@ -1,22 +1,16 @@
 {
 	"dataset_path" : "iraq-incidents.csv",
 	"fields" : {
-		"Time":	{
-			"type" : "string"
-		},
 		"Location":{
 			"type" : "string"
 		},
 		"Target": {
 			"type" : "string"
-		}, 
+		},
 		"Weapons": {
 			"type" : "string"
 		}, 
 		"Reported_Minimum":{
-			"type" : "numeric"
-		},
-		"Reported_Maximum":{
 			"type" : "numeric"
 		}
 	}
