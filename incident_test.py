@@ -33,7 +33,7 @@ def compute_percentile(value, cutoffs):
 			break
 	return 100.0
 
-def read_csv_as_json(csv_path, callback, updateStr = None, updateModulo = 1000):
+def read_csv_as_key_values(csv_path, callback, updateStr = None, updateModulo = 1000):
 	"""
 	Reads in the csv at csv_path. The first row is assumed to be keys 
 	callback is called with a dictionary with keys corresponding to column names 
@@ -83,7 +83,7 @@ def compute_schema_percentiles(schema):
 			if schemaFields[field]["type"] == FIELD_TYPE_NUMERIC:
 				values[field].append(float(row[field]))
 
-	read_csv_as_json(csv_path, lambda x: processRow(x, schemaFields, values))
+	read_csv_as_key_values(csv_path, lambda x: processRow(x, schemaFields, values))
 
 	# compute percentiles
 	for field in values:
@@ -151,17 +151,29 @@ def compare_docs(sentenceA, sentenceB, model):
 	return total
 
 def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, fieldsToCompare = None, numResults = 100):
+	"""
+	Point cloud search algoirthm. Given two key_value documents (positiveDoc, negativeDoc) it finds documents
+	similar to positive while also being dissimilar to negative.
+	:param positiveDoc: a json document which is "positive"
+	:param negativeDoc: a json document which is "negative"
+	:param schema: a schema for the dataset
+	:param model: a Word2Vec model
+	:param fieldsToCompare: (optional) fields to compare within the json doc
+	:param numResults: (optional) number of results to return
+	:return list of best matches
+	"""
+
 	if not fieldsToCompare:
 		fieldsToCompare = schema["fields"].keys()
 	# convert to sentence if doc is not a sentence
 	
 	if type(positiveDoc) == type({}):
-		docPositive = convert_json_to_sentence(schema, doc, fieldsToCompare)
+		docPositive = convert_key_value_to_sentence(schema, doc, fieldsToCompare)
 	else:
 		docPositive = positiveDoc
 
 	if type(negativeDoc) == type({}):
-		docNegative = convert_json_to_sentence(schema, doc, fieldsToCompare)
+		docNegative = convert_key_value_to_sentence(schema, doc, fieldsToCompare)
 	else:
 		docNegative = negativeDoc
 	
@@ -170,7 +182,7 @@ def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, fieldsToComp
 	
 	# scan through dataset
 	def compareValue(docPositive, docNegative, docToCompare, heap, schema, fieldsToCompare, model):
-		docB = convert_json_to_sentence(schema, docToCompare, fieldsToCompare)
+		docB = convert_key_value_to_sentence(schema, docToCompare, fieldsToCompare)
 		score = compare_docs(docPositive, docB, model)
 		if(docNegative):
 			score -= compare_docs(docNegative, docB, model)
@@ -179,7 +191,7 @@ def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, fieldsToComp
 		if len(heap) > numResults:
 			heapq.heappop(heap)
 
-	read_csv_as_json(schema["dataset_path"], lambda x : compareValue(docPositive, docNegative, x, heap, schema, fieldsToCompare, model), "Searching...")
+	read_csv_as_key_values(schema["dataset_path"], lambda x : compareValue(docPositive, docNegative, x, heap, schema, fieldsToCompare, model), "Searching...")
 	ret = []
 	for i in xrange(0, numResults):
 		ret.append(heapq.heappop(heap))
@@ -187,13 +199,27 @@ def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, fieldsToComp
 	return ret
 
 def generate_field_features(schema, field, value):
+	"""
+	Given a field value converts it to a sentence that is useable by the model
+	:param schema: dataset schema
+	:param field: fieldname in the schema for value
+	:param value: actual raw value
+	:return a sentence usable by a Word2Vec model
+	"""
 	global STEMMER
 	if(schema["fields"][field]["type"] == FIELD_TYPE_NUMERIC):
 		return [field + "_" + str(compute_percentile(float(value), schema["fields"][field]["percentile"]))+"_percentile", field+"_"+str(value)+"_value"]
 	else:
 		return map(lambda x : STEMMER.stem(x.lower()) , nltk.word_tokenize(value))
 
-def convert_json_to_sentence(schema, keyValues, fieldsToRead):
+def convert_key_value_to_sentence(schema, keyValues, fieldsToRead):
+	"""
+	Given a set of key values returns a sentence which can be fed to a Word2Vec model
+	:param schema: dataset schema
+	:param keyValues: the key values to convert to sentences
+	:param fieldsToRead: the keys to actually read (others will be ignored)
+	:return a sentence usable by a Word2Vec model
+	"""
 	features = []
 	for field in fieldsToRead:
 		value = keyValues[field]
@@ -208,6 +234,13 @@ def convert_json_to_sentence(schema, keyValues, fieldsToRead):
 	return featuresNonUnicode
 
 def train_model(schema, vectorSize, fieldsToRead = None):
+	"""
+	Given a schema and vectorSize trains the model.
+	:param schema: dataset schema
+	:param vectorSize: size of feature vectors to generate
+	:param fieldsToRead: the keys to actually train on (others will be ignored)
+	:return a Word2Vec model
+	"""
 	if not fieldsToRead:
 		fieldsToRead = schema["fields"].keys()
 
@@ -215,7 +248,7 @@ def train_model(schema, vectorSize, fieldsToRead = None):
 	# build sentences:
 	print "Building Feature vectors..."
 	csv_path = schema["dataset_path"]
-	read_csv_as_json(csv_path, lambda x : sentences.append(convert_json_to_sentence(schema, x, fieldsToRead)), "Built")
+	read_csv_as_key_values(csv_path, lambda x : sentences.append(convert_key_value_to_sentence(schema, x, fieldsToRead)), "Built")
 	print "Generated " + str(len(sentences)) + " documents"
 	print "Training Model..."
 	modelPath = model_path(schema)
