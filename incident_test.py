@@ -16,7 +16,14 @@ FIELD_TYPE_NUMERIC = "numeric"
 FIELD_TYPE_TEXT = "text"
 STEMMER = PorterStemmer()
 
+
 def compute_percentile(value, cutoffs):
+	"""
+	Given a value and a set of cutoffs returns the percentile within which the value lies
+	:param value: the value for which to determine the percentile
+	:param cutoffs: the cutoffs for 0th ...100th percentile (array of 10 ascending numbers)
+	:return the percentile within which value lies
+	"""
 	if value < cutoffs[0]:
 		return 0.0
 
@@ -26,7 +33,16 @@ def compute_percentile(value, cutoffs):
 			break
 	return 100.0
 
-def read_csv_as_json(csv_path, callback, updateStr = None):
+def read_csv_as_json(csv_path, callback, updateStr = None, updateModulo = 1000):
+	"""
+	Reads in the csv at csv_path. The first row is assumed to be keys 
+	callback is called with a dictionary with keys corresponding to column names 
+	and strings contianing values
+	:param csv_path: the path to the csv file
+	:param callback: a function taking in a single parameter (dictionary of key values for the row)
+	:param updateStr: (optional) a string that will display as the file reads each row
+	:param updateModulo: (optional) the number of rows to skip before showing the message
+	"""
 	fields = None
 	num = 0
 	with open(csv_path, 'rU') as csvfile:
@@ -43,10 +59,17 @@ def read_csv_as_json(csv_path, callback, updateStr = None):
 					keyValue[field] = value
 				callback(keyValue)
 				num += 1
-				if (updateStr and num % 1000 == 0):
+				if (updateStr and num % updateModulo == 0):
 					print updateStr + " " + str(num)
 
 def compute_schema_percentiles(schema):
+	"""
+	Given a schema with a dataset this function reads in the numeric fields and computes
+	the percentile cutoffs for the numerric fields. It appends this information to the schema
+	and returns it.
+	:param schema: the schema for the dataset
+	:return a schema with percentiles filled for each numeric field
+	"""
 	values = {}
 	csv_path = schema["dataset_path"]
 	schemaFields = schema["fields"]
@@ -58,7 +81,7 @@ def compute_schema_percentiles(schema):
 		# cache the values for numerics
 		for field in schemaFields:
 			if schemaFields[field]["type"] == FIELD_TYPE_NUMERIC:
-				values[field].append(float(row[field]));
+				values[field].append(float(row[field]))
 
 	read_csv_as_json(csv_path, lambda x: processRow(x, schemaFields, values))
 
@@ -71,7 +94,7 @@ def compute_schema_percentiles(schema):
 		percentiles = []
 		for i in xrange(0, 10):
 			percentile =  10 * i
-			a = scoreatpercentile(oneSidedList, percentile) - theMedian;
+			a = scoreatpercentile(oneSidedList, percentile) - theMedian
 			percentiles.append(a)
 		schemaFields[field]["percentile"] = percentiles
 	schema["fields"] = schemaFields
@@ -84,13 +107,18 @@ def weight_matrix_path(schema):
 	return os.path.join(os.path.dirname(schema["dataset_path"]), os.path.basename(schema["dataset_path"].split(".")[0] + "_weight.out"))
 
 
-# Document comparison algorithm
-# Given  documents A,B and |A|<|B|
-# assign an edge between all points in A to all points in B with weight = 1 / similarity(p1,p2)
-# run hungarian algorithm to find maximal matching (this yields a subset of A's points)
-# return sum of weights as score
-def compare_docs(sentenceA, sentenceB, model):
 
+def compare_docs(sentenceA, sentenceB, model):
+	"""
+	Document comparison algorithm
+	Given  documents A,B and |A|<|B|
+	assign an edge between all points in A to all points in B with weight = 1 / similarity(p1,p2)
+	run hungarian algorithm to find maximal matching (this yields a subset of A's points)
+	:param sentenceA: a sentence of words that are contained in the model
+	:param sentenceB: another sentence of words that are contained in the model
+	:param model: a Word2Vec model
+	:return sum of weights as score
+	"""
 	n = max(len(sentenceA), len(sentenceB))
 
 	if(len(sentenceA) < n):
@@ -103,15 +131,15 @@ def compare_docs(sentenceA, sentenceB, model):
 	# compute distance matrix from A => B
 	mat = []
 	for i in xrange(0, n):
-		row = [0 for m in xrange(0,n)];
+		row = [0 for m in xrange(0,n)]
 		for j in xrange(0,n):
 			if(i >= len(shorter)):
-				row[j] = 99999;
+				row[j] = 99999
 			else:
 				try:
 					row[j] = abs(1.0 / model.similarity(shorter[i], longer[j]))
 				except:
-					row[j] = 99999;
+					row[j] = 99999
 		mat.append(row)
 
 	# run hungarian algorithm on cost matrix
@@ -128,12 +156,12 @@ def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, fieldsToComp
 	# convert to sentence if doc is not a sentence
 	
 	if type(positiveDoc) == type({}):
-		docPositive = convert_json_to_sentence(schema, doc, fieldsToCompare);
+		docPositive = convert_json_to_sentence(schema, doc, fieldsToCompare)
 	else:
 		docPositive = positiveDoc
 
 	if type(negativeDoc) == type({}):
-		docNegative = convert_json_to_sentence(schema, doc, fieldsToCompare);
+		docNegative = convert_json_to_sentence(schema, doc, fieldsToCompare)
 	else:
 		docNegative = negativeDoc
 	
@@ -232,8 +260,8 @@ for word in words:
 		ys.append(w[1])
 		zs.append(w[2])
 	except:
-		continue;
-sc = ax.scatter(xs, ys, zs);
+		continue
+sc = ax.scatter(xs, ys, zs)
 
 labels = []
 for word in words:
