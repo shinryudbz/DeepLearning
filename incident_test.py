@@ -2,6 +2,7 @@ import pylab
 import json
 import numpy as np
 import os
+import time
 import csv
 from gensim.models.word2vec import *
 import nltk
@@ -110,8 +111,13 @@ def sentence_file_path(schema):
 	return os.path.join(os.path.dirname(schema["dataset_path"]), os.path.basename(schema["dataset_path"].split(".")[0] + "_sentences.out"))
 
 
-
-def compare_docs(sentenceA, sentenceB, model):
+HUNG_TIME = 0
+MAT_TIME = 0
+MULT_TIME = 0
+def compare_docs(sentenceA, sentenceB, model, similarityCache):
+	global HUNG_TIME
+	global MAT_TIME
+	global MULT_TIME
 	"""
 	Document comparison algorithm
 	Given  documents A,B and |A|<|B|
@@ -130,7 +136,7 @@ def compare_docs(sentenceA, sentenceB, model):
 	else:
 		shorter = sentenceB
 		longer = sentenceA
-
+	start = time.time()
 	# compute distance matrix from A => B
 	mat = []
 	for i in xrange(0, n):
@@ -140,13 +146,23 @@ def compare_docs(sentenceA, sentenceB, model):
 				row[j] = 99999
 			else:
 				try:
-					row[j] = abs(1.0 / model.similarity(shorter[i], longer[j]))
+					mstart = time.time()
+					key = (shorter[i], longer[j])
+					if(not key in similarityCache):
+						similarityCache[key] = abs(1.0 / model.similarity(shorter[i], longer[j]))
+					row[j] = similarityCache[key]
+					mend = time.time()
+					MULT_TIME += (mend-mstart)
 				except:
 					row[j] = 99999
 		mat.append(row)
-
 	# run hungarian algorithm on cost matrix
+	end = time.time()
+	MAT_TIME +=(end-start)
+	start = time.time()
 	matches = hungarian.lap(mat)[0]
+	end = time.time()
+	HUNG_TIME +=(end-start)
 	# sum over minimal distance matching
 	total = 0
 	for i in xrange(0, len(shorter)):
@@ -182,19 +198,20 @@ def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, fieldsToComp
 	
 	# build a search queue using heapq
 	heap = []
+	similarityCache = {}
 	
 	# scan through dataset
-	def compareValue(docPositive, docNegative, docToCompare, heap, model, fieldsToCompare):
+	def compareValue(docPositive, docNegative, docToCompare, heap, model, fieldsToCompare, similarityCache):
 		docToCompareFiltered = keys_to_single_sentence(docToCompare, fieldsToCompare)
-		score = compare_docs(docPositive, docToCompareFiltered, model)
+		score = compare_docs(docPositive, docToCompareFiltered, model, similarityCache)
 		if(docNegative):
-			score -= compare_docs(docNegative, docToCompareFiltered, model)
+			score -= compare_docs(docNegative, docToCompareFiltered, model, similarityCache)
 		heapq.heappush(heap, (score,docToCompare))
 		# pop the lowest score if we've gotten too many items
 		if len(heap) > numResults:
 			heapq.heappop(heap)
 
-	read_sentences(schema, lambda x : compareValue(docPositive, docNegative, x, heap, model, fieldsToCompare))
+	read_sentences(schema, lambda x : compareValue(docPositive, docNegative, x, heap, model, fieldsToCompare, similarityCache), "Searching")
 	ret = []
 	for i in xrange(0, numResults):
 		ret.append(heapq.heappop(heap))
@@ -256,7 +273,7 @@ def build_sentences(schema):
 			
 		read_csv_as_key_values(schema["dataset_path"], lambda x : processKeyValue(x, output, schema), "reading")
 
-def read_sentences(schema, callback):
+def read_sentences(schema, callback, update_message=None):
 	"""
 	Reads the sentences for the given schema and passes them back to the callback function
 	in the object given to the callback each field (key) maps to a set of sentences
@@ -264,11 +281,15 @@ def read_sentences(schema, callback):
 	:param callback: the function which receives the sentences read
 	"""
 	with open(sentence_file_path(schema), "r") as f:
+		i = 0
 		while True:
 			l = f.readline()
+			i = i+1
 			if not l:
 				break
 			callback(json.loads(l.rstrip()))
+			if(update_message and i%1000 == 0):
+				print update_message + " " +  str(i)
 
 def keys_to_single_sentence(keyValue, fieldsToRead):
 	"""
@@ -334,9 +355,12 @@ except:
 
 # run the point cloud search:
 ret = run_point_cloud_search(["Reported_Minimum_100.0_percentile","children","child"], ["bomb", "car"], schema, model)
-for r in ret:
-	print r
-
+print "Hungarian algorithm time"
+print HUNG_TIME
+print "Similarity matrix computation time"
+print MAT_TIME
+print "Similarity computation time"
+print MULT_TIME
 """
 xs = []
 ys = []
