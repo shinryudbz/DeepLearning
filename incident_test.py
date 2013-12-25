@@ -151,13 +151,13 @@ def compare_docs(sentenceA, sentenceB, model, similarityCache, worstInQueue):
 				try:
 					similarityVal = model.similarity(shorter[i], longer[j])
 				except:
-					similarityVal = MAX_VAL
+					similarityVal = 0.0
 				similarityCache[key] = similarityVal
 			else:
 				similarityVal = similarityCache[key]
 			if (not mostSimilar or similarityVal > mostSimilar):
 				mostSimilar = similarityVal;
-			mat[i][j] = abs(1.0 / similarityVal)
+			mat[i][j] = abs(1.0 / (similarityVal + 1.0)) # cost value is 1/similarity value
 
 	# early abort hungarian if there is no way we are in the top k:
 	if(mostSimilar and mostSimilar * len(shorter) < worstInQueue):
@@ -212,7 +212,9 @@ def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, fieldsToComp
 		score = compare_docs(docPositive, docToCompareFiltered, model, similarityCache, worst["value"])
 		if(docNegative):
 			score -= compare_docs(docNegative, docToCompareFiltered, model, similarityCache, worst["value"])
-		heapq.heappush(heap, (score,docToCompare))
+		if(worst["value"] == None or (worst["value"] < score)):
+			heapq.heappush(heap, (score,docToCompare))
+		
 		# pop the lowest score if we've gotten too many items
 		if len(heap) > numResults:
 			worst["value"] = heapq.heappop(heap)[0]
