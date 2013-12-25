@@ -241,6 +241,10 @@ def convert_key_value_to_sentence(schema, keyValues, fieldsToRead):
 	return features
 
 def build_sentences(schema):
+	"""
+	Generates a sentence file for the schema. 
+	:param schema: the dataset schema
+	"""
 	with open(sentence_file_path(schema), "w") as output:
 		def processKeyValue(keyValue, output, schema):
 			sentencesByKey = {}
@@ -253,6 +257,12 @@ def build_sentences(schema):
 		read_csv_as_key_values(schema["dataset_path"], lambda x : processKeyValue(x, output, schema), "reading")
 
 def read_sentences(schema, callback):
+	"""
+	Reads the sentences for the given schema and passes them back to the callback function
+	in the object given to the callback each field (key) maps to a set of sentences
+	:param schema: the dataset schemaFields
+	:param callback: the function which receives the sentences read
+	"""
 	with open(sentence_file_path(schema), "r") as f:
 		while True:
 			l = f.readline()
@@ -261,6 +271,13 @@ def read_sentences(schema, callback):
 			callback(json.loads(l.rstrip()))
 
 def keys_to_single_sentence(keyValue, fieldsToRead):
+	"""
+	Given a keyValue where values are sentences it converts
+	the input into a single sentence by pulling fields from fieldsToRead
+	:param keyValue: the map from fields to sentences
+	:param fieldsToRead: the set of keys to actually useable
+	:return a single sentences with fields from fieldsToRead
+	"""
 	ret = []
 	for field in fieldsToRead:
 		if(field in keyValue):
