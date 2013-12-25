@@ -113,11 +113,11 @@ def sentence_file_path(schema):
 
 HUNG_TIME = 0
 MAT_TIME = 0
-MULT_TIME = 0
-def compare_docs(sentenceA, sentenceB, model, similarityCache):
+SIMILARITY_TIME = 0
+def compare_docs(sentenceA, sentenceB, model, similarityCache, worstInQueue):
 	global HUNG_TIME
 	global MAT_TIME
-	global MULT_TIME
+	global SIMILARITY_TIME
 	"""
 	Document comparison algorithm
 	Given  documents A,B and |A|<|B|
@@ -136,28 +136,37 @@ def compare_docs(sentenceA, sentenceB, model, similarityCache):
 	else:
 		shorter = sentenceB
 		longer = sentenceA
-	start = time.time()
+
 	# compute distance matrix from A => B
-	mat = []
+	mat =  np.zeros((n, n))
+	mostSimilar = None
 	for i in xrange(0, n):
-		row = [0 for m in xrange(0,n)]
 		for j in xrange(0,n):
 			if(i >= len(shorter)):
-				row[j] = 99999
+				mat[i][j] = 99999
 			else:
-				try:
-					mstart = time.time()
-					key = (shorter[i], longer[j])
-					if(not key in similarityCache):
-						similarityCache[key] = abs(1.0 / model.similarity(shorter[i], longer[j]))
-					row[j] = similarityCache[key]
-					mend = time.time()
-					MULT_TIME += (mend-mstart)
-				except:
-					row[j] = 99999
-		mat.append(row)
+				mstart = time.time()
+				key = (shorter[i], longer[j])
+				similarityVal = None
+				if(not key in similarityCache):
+					try:
+						similarityVal = model.similarity(shorter[i], longer[j])
+					except:
+						similarityVal = 99999
+					similarityCache[key] = similarityVal
+				else:
+					similarityVal = similarityCache[key]
+				if (not mostSimilar or similarityVal > mostSimilar):
+					mostSimilar = similarityVal;
+				mend = time.time()
+				SIMILARITY_TIME += mend-mstart
+				mat[i][j] = abs(1.0 / similarityVal)
+	# early abort hungarian if there is no way we are in the top k:
+	if(mostSimilar and mostSimilar * len(shorter) < worstInQueue):
+		return -1
+
 	# run hungarian algorithm on cost matrix
-	end = time.time()
+	
 	MAT_TIME +=(end-start)
 	start = time.time()
 	matches = hungarian.lap(mat)[0]
@@ -166,7 +175,8 @@ def compare_docs(sentenceA, sentenceB, model, similarityCache):
 	# sum over minimal distance matching
 	total = 0
 	for i in xrange(0, len(shorter)):
-		total += model.similarity(shorter[i], longer[matches[i]])
+		key = (shorter[i], longer[matches[i]])
+		total += similarityCache[key];
 	return total
 
 def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, fieldsToCompare = None, numResults = 100):
@@ -199,19 +209,19 @@ def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, fieldsToComp
 	# build a search queue using heapq
 	heap = []
 	similarityCache = {}
-	
+	worst = { "value" : None }
 	# scan through dataset
-	def compareValue(docPositive, docNegative, docToCompare, heap, model, fieldsToCompare, similarityCache):
+	def compareValue(docPositive, docNegative, docToCompare, heap, model, fieldsToCompare, similarityCache, worst):
 		docToCompareFiltered = keys_to_single_sentence(docToCompare, fieldsToCompare)
-		score = compare_docs(docPositive, docToCompareFiltered, model, similarityCache)
+		score = compare_docs(docPositive, docToCompareFiltered, model, similarityCache, worst["value"])
 		if(docNegative):
-			score -= compare_docs(docNegative, docToCompareFiltered, model, similarityCache)
+			score -= compare_docs(docNegative, docToCompareFiltered, model, similarityCache, worst["value"])
 		heapq.heappush(heap, (score,docToCompare))
 		# pop the lowest score if we've gotten too many items
 		if len(heap) > numResults:
-			heapq.heappop(heap)
+			worst["value"] = heapq.heappop(heap)[0]
 
-	read_sentences(schema, lambda x : compareValue(docPositive, docNegative, x, heap, model, fieldsToCompare, similarityCache), "Searching")
+	read_sentences(schema, lambda x : compareValue(docPositive, docNegative, x, heap, model, fieldsToCompare, similarityCache, worst), "Searching")
 	ret = []
 	for i in xrange(0, numResults):
 		ret.append(heapq.heappop(heap))
@@ -360,7 +370,7 @@ print HUNG_TIME
 print "Similarity matrix computation time"
 print MAT_TIME
 print "Similarity computation time"
-print MULT_TIME
+print SIMILARITY_TIME
 """
 xs = []
 ys = []
