@@ -210,7 +210,7 @@ except:
 	# otherwise compute it:
 	model = train_model(schema, 50)
 
-ret = run_point_cloud_search(["Reported_Minimum_100.0_percentile", "car"], ["bomb"], schema, model)
+ret = run_point_cloud_search(["Reported_Minimum_100.0_percentile","children","child"], ["bomb", "car"], schema, model)
 for r in ret:
 	print r
 
