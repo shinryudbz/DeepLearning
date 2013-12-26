@@ -14,7 +14,7 @@ import heapq
 ## Defaults ##
 DEFAULT_VECTOR_SIZE = 3
 DEFAULT_PERCENTILE_BUCKETS = 3
-
+DEFAULT_BASE_PATH = ""
 ## Constants ##
 FIELD_TYPE_NUMERIC = "numeric"
 FIELD_TYPE_TEXT = "text"
@@ -22,7 +22,7 @@ FIELD_TYPE_TEXT = "text"
 """" 
 Example Schema:
 {
-	"dataset_path" : "iraq-incidents.csv",
+	"dataset_path" : "iraq_incidents.csv",
 	"fields" : {
 		"Location":{
 			"type" : "string"
@@ -114,7 +114,7 @@ def read_dataset_as_key_values(schema, callback,  updateStr=None, updateModulo =
 	:param updateStr: (optional) a string that will display as the file reads each row
 	:param updateModulo: (optional) the number of rows to skip before showing the message
 	"""
-	csv_path = schema["dataset_path"]
+	csv_path = os.path.join(DEFAULT_BASE_PATH, schema["dataset_path"])
 	if "delimiter" in schema:
 		delimiterStr = '\t'
 	else:
@@ -197,16 +197,16 @@ def build_search_sentences(schema):
 ### functions for getting paths for various generated files from within the schema ###
 
 def model_path(schema):
-	return os.path.join(os.path.dirname(schema["dataset_path"]), os.path.basename(schema["dataset_path"].split(".")[0] + "_model.out"))
+	return os.path.join(DEFAULT_BASE_PATH, os.path.dirname(schema["dataset_path"]), os.path.basename(schema["dataset_path"].split(".")[0] + "_model.out"))
 
 def weight_matrix_path(schema):
-	return os.path.join(os.path.dirname(schema["dataset_path"]), os.path.basename(schema["dataset_path"].split(".")[0] + "_weight.out"))
+	return os.path.join(DEFAULT_BASE_PATH, os.path.dirname(schema["dataset_path"]), os.path.basename(schema["dataset_path"].split(".")[0] + "_weight.out"))
 
 def sentence_file_path(schema):
-	return os.path.join(os.path.dirname(schema["dataset_path"]), os.path.basename(schema["dataset_path"].split(".")[0] + "_sentences.out"))
+	return os.path.join(DEFAULT_BASE_PATH, os.path.dirname(schema["dataset_path"]), os.path.basename(schema["dataset_path"].split(".")[0] + "_sentences.out"))
 
 def search_sentence_file_path(schema):
-	return os.path.join(os.path.dirname(schema["dataset_path"]), os.path.basename(schema["dataset_path"].split(".")[0] + "_search_sentences.out"))
+	return os.path.join(DEFAULT_BASE_PATH, os.path.dirname(schema["dataset_path"]), os.path.basename(schema["dataset_path"].split(".")[0] + "_search_sentences.out"))
 
 
 
@@ -440,10 +440,15 @@ def plot_schema_vectors(schema, model):
 
 
 if __name__ == '__main__':
+	
 	if(len(sys.argv)>1):
-		json_data = open(sys.argv[1]).read()
+		path = sys.argv[1]
 	else:
-		json_data = open('iris_schema.json').read()
+		path = 'data/iris/iris_schema.json'
+
+	DEFAULT_BASE_PATH = os.path.dirname(path)
+
+	json_data = open(path).read()
 	schema = json.loads(json_data)
 	schema = compute_schema_percentiles(schema)
 

@@ -1,0 +1,20 @@
+{
+	"dataset_path" : "iris.csv",
+	"fields" : {
+		"Sepal_Length":{
+			"type" : "numeric"
+		},
+		"Sepal_Width": {
+			"type" : "numeric"
+		},
+		"Petal_Length": {
+			"type" : "numeric"
+		}, 
+		"Petal_Width":{
+			"type" : "numeric"
+		}, 
+		"Species":{
+			"type" : "string"
+		}
+	}
+}
