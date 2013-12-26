@@ -239,11 +239,19 @@ def train_model(schema, vectorSize, fieldsToRead = None):
 	print "Finished training"
 	return model
 
-
+CMP_DOCS_TIME = 0
+HEAP_TIME = 0
+CONVERT_TIME = 0
+MAT_COMPUTATION_TIME = 0
+HUNGARIAN_TIME = 0
+GENSIM_SIMILARITY_TIME = 0
+MAT_WRITE_TIME = 0
 ## method for comparing and searching documents
-
-CMP_TIME = 0
 def compare_docs(sentenceA, sentenceB, model, similarityCache, worstInQueue):
+	global MAT_COMPUTATION_TIME
+	global HUNGARIAN_TIME
+	global GENSIM_SIMILARITY_TIME
+	global MAT_WRITE_TIME
 	"""
 	Document comparison algorithm
 	Given  documents A,B and |A|<|B|
@@ -254,9 +262,7 @@ def compare_docs(sentenceA, sentenceB, model, similarityCache, worstInQueue):
 	:param model: a Word2Vec model
 	:return sum of weights as score
 	"""
-	global CMP_TIME
 	MAX_VAL = 999999
-	start = time.time()
 	lA = len(sentenceA)
 	n = max(lA, len(sentenceB))
 
@@ -273,40 +279,58 @@ def compare_docs(sentenceA, sentenceB, model, similarityCache, worstInQueue):
 	mat =  np.zeros((n, n))
 	mat.fill(MAX_VAL)
 	mostSimilar = None
-
+	start = time.time()
 	for i in xrange(0, lS):
 		for j in xrange(0,n):
 			key = (shorter[i], longer[j])
 			similarityVal = None
 			if(not key in similarityCache):
 				try:
+					start1 = time.time()
 					similarityVal = model.similarity(shorter[i], longer[j])
+					end1 = time.time()
+					GENSIM_SIMILARITY_TIME += end1-start1
 				except:
 					similarityVal = 0.0
 				similarityCache[key] = similarityVal
 			else:
 				similarityVal = similarityCache[key]
 			if (not mostSimilar or similarityVal > mostSimilar):
-				mostSimilar = similarityVal;
+				mostSimilar = similarityVal
+			start2 = time.time()
 			mat[i][j] = abs(1.0 / (similarityVal + 1.0)) # cost value is 1/similarity value
+			end2 = time.time()
+			MAT_WRITE_TIME += end2-start2
+	end = time.time()
+
+	MAT_COMPUTATION_TIME += end-start
 
 	# early abort hungarian if there is no way we are in the top k:
 	if(mostSimilar and mostSimilar * len(shorter) < worstInQueue):
 		return -1
 
+
 	# run hungarian algorithm on cost matrix
+	start = time.time()
 	matches = hungarian.lap(mat)[0]
-	
+	end = time.time()
+	HUNGARIAN_TIME += end-start
 	# sum over minimal distance matching
 	total = 0
 	for i in xrange(0, len(shorter)):
 		key = (shorter[i], longer[matches[i]])
 		total += similarityCache[key];
-	end = time.time()
-	CMP_TIME +=(end-start)
 	return total
 
+
 def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, fieldsToCompare = None, numResults = 100):
+	global CONVERT_TIME
+	global CMP_DOCS_TIME
+	global HEAP_TIME
+	global MAT_COMPUTATION_TIME
+	global HUNGARIAN_TIME
+	global GENSIM_SIMILARITY_TIME
+	global MAT_WRITE_TIME
 	"""
 	Point cloud search algoirthm. Given two key_value documents (positiveDoc, negativeDoc) it finds documents
 	similar to positive while also being dissimilar to negative.
@@ -339,22 +363,55 @@ def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, fieldsToComp
 	worst = { "value" : None }
 	# scan through dataset
 	def compareValue(docPositive, docNegative, docToCompare, heap, model, fieldsToCompare, similarityCache, worst):
+		global CONVERT_TIME
+		global CMP_DOCS_TIME
+		global HEAP_TIME
+		start = time.time()
 		docToCompareFiltered = merge_sentences_to_single_sentence(docToCompare, fieldsToCompare)
+		end = time.time()
+		CONVERT_TIME += end-start
+		
+		start = time.time()
 		score = compare_docs(docPositive, docToCompareFiltered, model, similarityCache, worst["value"])
 		if(docNegative):
 			score -= compare_docs(docNegative, docToCompareFiltered, model, similarityCache, worst["value"])
+		end = time.time()
+		CMP_DOCS_TIME += end-start
+
+		start = time.time()
 		if(worst["value"] == None or (worst["value"] < score)):
 			heapq.heappush(heap, (score,docToCompare))
 		
 		# pop the lowest score if we've gotten too many items
 		if len(heap) > numResults:
 			worst["value"] = heapq.heappop(heap)[0]
+		end = time.time()
+		HEAP_TIME +=end-start
 
 	read_sentences(schema, lambda x : compareValue(docPositive, docNegative, x, heap, model, fieldsToCompare, similarityCache, worst), "Searching")
 	ret = []
 	for i in xrange(0, numResults):
 		ret.append(heapq.heappop(heap))
 	ret.reverse()
+
+	print "Doc cmp time"
+	print CMP_DOCS_TIME
+	print "Convert time"
+	print CONVERT_TIME
+	print "Heap time"
+	print HEAP_TIME
+	print "GenSim vec similarity time"
+	print GENSIM_SIMILARITY_TIME
+	print "Mat Write time"
+	print MAT_WRITE_TIME
+	print "Matrix construction time"
+	print MAT_COMPUTATION_TIME
+	print "Hungarian time"
+	print HUNGARIAN_TIME
+
+
+	
+
 	return ret
 
 
@@ -383,8 +440,6 @@ if __name__ == '__main__':
 	start1 = time.time();
 	ret = run_point_cloud_search(["Reported_Minimum_100.0_percentile","children","child"], ["bomb", "car"], schema, model)
 	start2 = time.time();
-	print "Compare Docs Time"
-	print CMP_TIME
 
 	print "Total Time"
 	print str(start2-start1)
