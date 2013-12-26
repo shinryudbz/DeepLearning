@@ -1,7 +1,5 @@
-import pylab
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import proj3d
-
+import math
 import json
 import numpy as np
 import os
@@ -13,10 +11,13 @@ from scipy.stats import scoreatpercentile
 import hungarian
 import heapq
 
+## Defaults ##
+DEFAULT_VECTOR_SIZE = 3
+DEFAULT_PERCENTILE_BUCKETS = 3
+
+## Constants ##
 FIELD_TYPE_NUMERIC = "numeric"
 FIELD_TYPE_TEXT = "text"
-
-
 
 """" 
 Example Schema:
@@ -56,7 +57,7 @@ def compute_percentile(value, cutoffs):
 
 	for i, cutoff in enumerate(cutoffs):
 		if value < cutoff:
-			return 100 * (float(i)/(len(cutoffs)))
+			return math.floor(100 * (float(i)/(len(cutoffs))))
 			break
 	return 100.0
 
@@ -82,7 +83,10 @@ def compute_schema_percentiles(schema):
 				values[field].append(convert_to_float(row[field]))
 
 	read_dataset_as_key_values(schema, lambda x: processRow(x, schemaFields, values))
-	NUM_BUCKETS = 10
+	if("buckets" in schema):
+		NUM_BUCKETS = int(schema["buckets"])
+	else:
+		NUM_BUCKETS = DEFAULT_PERCENTILE_BUCKETS
 	# compute percentiles
 	for field in values:
 		theList = np.array(values[field])
@@ -91,7 +95,7 @@ def compute_schema_percentiles(schema):
 		oneSidedList[theList < theMedian] = 2*theMedian - theList[theList < theMedian]
 		percentiles = []
 		for i in xrange(0, NUM_BUCKETS):
-			percentile =  100 * (i / float(NUM_BUCKETS))
+			percentile =  math.floor(100 * (i / float(NUM_BUCKETS)))
 			a = scoreatpercentile(oneSidedList, percentile)
 			percentiles.append(a)
 		schemaFields[field]["percentile"] = percentiles
@@ -262,7 +266,7 @@ def generate_field_features(schema, field, value):
 
 
 ### methods for training a model ###
-def train_model(schema, vectorSize, fieldsToRead = None):
+def train_model(schema,fieldsToRead = None):
 	"""
 	Given a schema and vectorSize trains the model.
 	:param schema: dataset schema
@@ -272,6 +276,11 @@ def train_model(schema, vectorSize, fieldsToRead = None):
 	"""
 	if not fieldsToRead:
 		fieldsToRead = schema["fields"].keys()
+
+	if("vector_size" in schema):
+		vectorSize = schema["vector_size"]
+	else:
+		vectorSize = DEFAULT_VECTOR_SIZE
 
 	sentences = []
 	# build sentences:
@@ -404,12 +413,37 @@ def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, validWords, 
 	ret.reverse()
 	return ret
 
+def plot_schema_vectors(schema, model):
+	xs = []
+	ys = []
+	fig, ax = plt.subplots()
+	vectorList = map(lambda x : x.rstrip().split(' ')[0], open(weight_matrix_path(schema), "r").readlines())
+
+	words = vectorList[:100]
+	annotations = []
+	if(len(words[0]) != 2):
+		print "Vectors must be of dimension 2 to plot!"
+		return
+	for word in words:
+		try:
+			w = model[word]
+			xs.append(w[0])
+			ys.append(w[1])
+			annotations.append(word)
+		except:
+			continue
+	
+	ax.scatter(xs, ys)
+	for i, txt in enumerate(annotations):
+		ax.annotate(txt, (xs[i],ys[i]))
+	plt.show()
+
 
 if __name__ == '__main__':
 	if(len(sys.argv)>1):
 		json_data = open(sys.argv[1]).read()
 	else:
-		json_data = open('iraq-schema.json').read()
+		json_data = open('iris_schema.json').read()
 	schema = json.loads(json_data)
 	schema = compute_schema_percentiles(schema)
 
@@ -426,8 +460,9 @@ if __name__ == '__main__':
 		model =  Word2Vec.load_word2vec_format(weight_matrix_path(schema), binary=False)
 	except:
 		# otherwise compute it:
-		model = train_model(schema, 100)
+		model = train_model(schema)
 
+	plot_schema_vectors(schema,model)
 	# check if search sentences have been made :
 	try:
 		# try loading model
@@ -457,45 +492,3 @@ if __name__ == '__main__':
 			print "Score : " + str(val[0])
 			print ""
 			print "------"
-
-"""
-xs = []
-ys = []
-zs = []
-
-fig = plt.figure()
-ax = fig.add_subplot(111, projection='3d')
-vectorList = map(lambda x : x.rstrip().split(' ')[0], open(weight_matrix_path(schema), "r").readlines())
-
-print vectorList
-words = map( lambda x : STEMMER.stem(x.lower()), vectorList[:100])
-for word in words:
-	try:
-		w = model[word]
-		xs.append(w[0])
-		ys.append(w[1])
-		zs.append(w[2])
-	except:
-		continue
-sc = ax.scatter(xs, ys, zs)
-
-labels = []
-for word in words:
-	try:
-		x2, y2, _ = proj3d.proj_transform(model[word][0],model[word][1],model[word][2], ax.get_proj())
-		label = ax.annotate(word, xy = (x2, y2), xytext = (-20, 20), textcoords = 'offset points', ha = 'right', va = 'bottom', bbox = dict(boxstyle = 'round,pad=0.5', fc = 'yellow', alpha = 0.5), arrowprops = dict(arrowstyle = '->', connectionstyle = 'arc3,rad=0'))
-		labels.append((label, model[word]))
-	except:
-		continue
-
-def update_position(e):
-	for labelArr in labels:
-		x2, y2, _ = proj3d.proj_transform(labelArr[1][0], labelArr[1][1], labelArr[1][2], ax.get_proj())
-		labelArr[0].xy = x2,y2
-		labelArr[0].update_positions(fig.canvas.renderer)
-		fig.canvas.draw()
-
-fig.canvas.mpl_connect('button_release_event', update_position)
-pylab.show()
-plt.show()
-"""
