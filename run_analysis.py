@@ -12,7 +12,7 @@ import hungarian
 import heapq
 
 ## Defaults ##
-DEFAULT_VECTOR_SIZE = 3
+DEFAULT_VECTOR_SIZE = 2
 DEFAULT_PERCENTILE_BUCKETS = 3
 DEFAULT_BASE_PATH = ""
 ## Constants ##
