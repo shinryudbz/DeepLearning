@@ -397,7 +397,10 @@ def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, validWords, 
 
 
 if __name__ == '__main__':
-	json_data = open(sys.argv[1]).read()
+	if(len(sys.argv)>1):
+		json_data = open(sys.argv[1]).read()
+	else:
+		json_data = open('iraq-schema.json').read()
 	schema = json.loads(json_data)
 	schema = compute_schema_percentiles(schema)
 
