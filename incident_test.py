@@ -17,6 +17,28 @@ FIELD_TYPE_NUMERIC = "numeric"
 FIELD_TYPE_TEXT = "text"
 
 
+
+"""" 
+Example Schema:
+{
+	"dataset_path" : "iraq-incidents.csv",
+	"fields" : {
+		"Location":{
+			"type" : "string"
+		},
+		"Target": {
+			"type" : "string"
+		},
+		"Weapons": {
+			"type" : "string"
+		}, 
+		"Reported_Minimum":{
+			"type" : "numeric"
+		}
+	}
+}
+"""
+
 ### Functions for computing percentiles on a single value or over an entire schema ####
 
 def compute_percentile(value, cutoffs):
@@ -412,10 +434,17 @@ if __name__ == '__main__':
 		ret = run_point_cloud_search(pos, neg, schema, model, validWords)
 		start2 = time.time();
 
-		print "Total Time"
-		print str(start2-start1)
 		for val in ret:
-			print val[1]["original_data"]
+
+			keyvals = val[1]["original_data"]
+			for key in keyvals:
+				if key in schema["fields"] and schema["fields"][key]["type"] == "numeric":
+					print key + " : " + str(keyvals[key]) + " (" + str(compute_percentile(float(keyvals[key]),schema["fields"][key]["percentile"])) + " percentile)"
+				else:
+					print key + " : " + str(keyvals[key])
+			print "Score : " + str(val[0])
+			print ""
+			print "------"
 
 """
 xs = []
