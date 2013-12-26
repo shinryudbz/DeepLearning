@@ -1,5 +1,5 @@
 {
-	"dataset_path" : "iraq-incidents.csv",
+	"dataset_path" : "iraq_incidents.csv",
 	"buckets" : 20,
 	"fields" : {
 		"Location":{

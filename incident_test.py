@@ -327,19 +327,39 @@ def compare_docs(sentenceA, sentenceB, model, similarityCache, worstInQueue):
 	mat.fill(MAX_VAL)
 	mostSimilar = None
 	
+
+	def computeKernel(i,j, state):
+		shorter = state["shorter"]
+		longer = state["longer"]
+		model = state["model"]
+		similarityCache = state["similarityCache"]
+
+		key = (shorter[i], longer[j])
+		similarityVal = 0
+		try:
+			similarityVal = similarityCache[key]
+		except:
+			# TODO: GET RID OF TRY - CATCH!
+			similarityVal = model.similarity(shorter[i], longer[j])
+			similarityCache[key] = similarityVal
+		return -similarityVal
+	
+	i, j = np.ix_(np.arange(lS), np.arange(n))
+	state = {
+		"shorter" : shorter,
+		"longer" : longer,
+		"model" : model,
+		"similarityCache" : similarityCache
+	};
+	
+
+#	f = np.vectorize(computeKernel, excluded=['state'])
+#	mat[:lS] = f(i, j, state)
+
+		
 	for i in xrange(0, lS):
 		for j in xrange(0,n):
-			key = (shorter[i], longer[j])
-			similarityVal = 0
-			try:
-				similarityVal = similarityCache[key]
-			except:
-				# TODO: GET RID OF TRY - CATCH!
-				similarityVal = model.similarity(shorter[i], longer[j])
-				similarityCache[key] = similarityVal
-			if (not mostSimilar or similarityVal > mostSimilar):
-				mostSimilar = similarityVal
-			mat[i][j] = -similarityVal; # cost is inverse of similarity
+			mat[i][j] = computeKernel(i,j,state)
 
 	# early abort hungarian if there is no way we are in the top k:
 	if(mostSimilar and mostSimilar * len(shorter) < worstInQueue):
@@ -414,16 +434,23 @@ def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, validWords, 
 	return ret
 
 def plot_schema_vectors(schema, model):
-	xs = []
-	ys = []
-	fig, ax = plt.subplots()
+	"""
+	Plots the first 100 word vectors for the given model
+	"""
 	vectorList = map(lambda x : x.rstrip().split(' ')[0], open(weight_matrix_path(schema), "r").readlines())
-
 	words = vectorList[:100]
-	annotations = []
+	
 	if(len(words[0]) != 2):
 		print "Vectors must be of dimension 2 to plot!"
 		return
+	xs = []
+	ys = []
+	fig, ax = plt.subplots()
+	
+
+	
+	annotations = []
+	
 	for word in words:
 		try:
 			w = model[word]
@@ -485,7 +512,7 @@ if __name__ == '__main__':
 
 		ret = run_point_cloud_search(pos, neg, schema, model, validWords, None, 10)
 		start2 = time.time();
-
+		print "Time: " + str(start2-start1)
 		for val in ret:
 
 			keyvals = val[1]["original_data"]
