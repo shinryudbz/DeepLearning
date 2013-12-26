@@ -108,14 +108,18 @@ def read_csv_as_key_values(csv_path, callback, updateStr = None, updateModulo = 
 
 ### Functions for reading and writing sentences from a schema ####
 
-def read_sentences(schema, callback, update_message=None):
+def read_sentences(schema, callback, search_sentences = False, update_message=None):
 	"""
 	Reads the sentences for the given schema and passes them back to the callback function
 	in the object given to the callback each field (key) maps to a set of sentences
 	:param schema: the dataset schemaFields
 	:param callback: the function which receives the sentences read
 	"""
-	with open(sentence_file_path(schema), "r") as f:
+	if(search_sentences):
+		path = search_sentence_file_path(schema)
+	else:
+		path = sentence_file_path(schema)
+	with open(path, "r") as f:
 		i = 0
 		while True:
 			l = f.readline()
@@ -144,6 +148,19 @@ def build_sentences(schema):
 			
 		read_csv_as_key_values(schema["dataset_path"], lambda x : processKeyValue(x, output, schema), "reading")
 
+def build_search_sentences(schema):
+	# build list of validWords in model:
+	validWords = map (lambda x : x.rstrip().split(" ")[0], open(weight_matrix_path(schema), "r").readlines())
+	with open(search_sentence_file_path(schema), "w") as output:
+		def processKeyValue(keyValue, output, schema, validWords):
+			sentencesByKey = {}
+			for key in keyValue:
+				words = generate_field_features(schema, key, keyValue[key])
+				if(len(words)):
+					sentencesByKey[key] = filter( lambda x : x in validWords, words)
+			output.write(json.dumps(sentencesByKey)+"\n")
+			
+		read_csv_as_key_values(schema["dataset_path"], lambda x : processKeyValue(x, output, schema, validWords), "reading")
 ### functions for getting paths for various generated files from within the schema ###
 
 def model_path(schema):
@@ -154,6 +171,10 @@ def weight_matrix_path(schema):
 
 def sentence_file_path(schema):
 	return os.path.join(os.path.dirname(schema["dataset_path"]), os.path.basename(schema["dataset_path"].split(".")[0] + "_sentences.out"))
+
+def search_sentence_file_path(schema):
+	return os.path.join(os.path.dirname(schema["dataset_path"]), os.path.basename(schema["dataset_path"].split(".")[0] + "_search_sentences.out"))
+
 
 
 ### functions for manipulating a piece of raw data into sentences ###
@@ -239,19 +260,8 @@ def train_model(schema, vectorSize, fieldsToRead = None):
 	print "Finished training"
 	return model
 
-CMP_DOCS_TIME = 0
-HEAP_TIME = 0
-CONVERT_TIME = 0
-MAT_COMPUTATION_TIME = 0
-HUNGARIAN_TIME = 0
-GENSIM_SIMILARITY_TIME = 0
-MAT_WRITE_TIME = 0
 ## method for comparing and searching documents
-def compare_docs(sentenceA, sentenceB, model, similarityCache, worstInQueue, validWords):
-	global MAT_COMPUTATION_TIME
-	global HUNGARIAN_TIME
-	global GENSIM_SIMILARITY_TIME
-	global MAT_WRITE_TIME
+def compare_docs(sentenceA, sentenceB, model, similarityCache, worstInQueue):
 	"""
 	Document comparison algorithm
 	Given  documents A,B and |A|<|B|
@@ -282,39 +292,25 @@ def compare_docs(sentenceA, sentenceB, model, similarityCache, worstInQueue, val
 	
 	for i in xrange(0, lS):
 		for j in xrange(0,n):
-			start = time.time()
 			key = (shorter[i], longer[j])
 			similarityVal = 0
 			try:
 				similarityVal = similarityCache[key]
 			except:
 				# TODO: GET RID OF TRY - CATCH!
-				try:
-					similarityVal = model.similarity(shorter[i], longer[j])
-				except:
-					similarityVal = 0.0
+				similarityVal = model.similarity(shorter[i], longer[j])
 				similarityCache[key] = similarityVal
 			if (not mostSimilar or similarityVal > mostSimilar):
 				mostSimilar = similarityVal
-			end = time.time()
-
-			start1 = time.time()
 			mat[i][j] = -similarityVal; # cost is inverse of similarity
-			end1 = time.time()
-			MAT_WRITE_TIME += end1-start1
-			
-			MAT_COMPUTATION_TIME += end-start
+
 	return 0
 	# early abort hungarian if there is no way we are in the top k:
 	if(mostSimilar and mostSimilar * len(shorter) < worstInQueue):
 		return -1
-
-
 	# run hungarian algorithm on cost matrix
-	start = time.time()
 	matches = hungarian.lap(mat)[0]
-	end = time.time()
-	HUNGARIAN_TIME += end-start
+
 	# sum over minimal distance matching
 	total = 0
 	for i in xrange(0, len(shorter)):
@@ -324,13 +320,6 @@ def compare_docs(sentenceA, sentenceB, model, similarityCache, worstInQueue, val
 
 
 def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, fieldsToCompare = None, numResults = 100):
-	global CONVERT_TIME
-	global CMP_DOCS_TIME
-	global HEAP_TIME
-	global MAT_COMPUTATION_TIME
-	global HUNGARIAN_TIME
-	global GENSIM_SIMILARITY_TIME
-	global MAT_WRITE_TIME
 	"""
 	Point cloud search algoirthm. Given two key_value documents (positiveDoc, negativeDoc) it finds documents
 	similar to positive while also being dissimilar to negative.
@@ -356,65 +345,30 @@ def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, fieldsToComp
 		docNegative = convert_key_value_to_sentence(schema, doc, fieldsToCompare)
 	else:
 		docNegative = negativeDoc
-	
-	# build list of validWords in model:
-	validWords = map (lambda x : x.rstrip().split(" ")[0], open(weight_matrix_path(schema), "r").readlines())
 
 	# build a search queue using heapq
 	heap = []
 	similarityCache = {}
 	worst = { "value" : None }
 	# scan through dataset
-	def compareValue(docPositive, docNegative, docToCompare, heap, model, fieldsToCompare, similarityCache, worst, validWords):
-		global CONVERT_TIME
-		global CMP_DOCS_TIME
-		global HEAP_TIME
-		start = time.time()
+	def compareValue(docPositive, docNegative, docToCompare, heap, model, fieldsToCompare, similarityCache, worst):
 		docToCompareFiltered = merge_sentences_to_single_sentence(docToCompare, fieldsToCompare)
-		end = time.time()
-		CONVERT_TIME += end-start
-		
-		start = time.time()
-		score = compare_docs(docPositive, docToCompareFiltered, model, similarityCache, worst["value"], validWords)
+		score = compare_docs(docPositive, docToCompareFiltered, model, similarityCache, worst["value"])
 		if(docNegative):
-			score -= compare_docs(docNegative, docToCompareFiltered, model, similarityCache, worst["value"], validWords)
-		end = time.time()
-		CMP_DOCS_TIME += end-start
+			score -= compare_docs(docNegative, docToCompareFiltered, model, similarityCache, worst["value"])
 
-		start = time.time()
 		if(worst["value"] == None or (worst["value"] < score)):
 			heapq.heappush(heap, (score,docToCompare))
 		
 		# pop the lowest score if we've gotten too many items
 		if len(heap) > numResults:
 			worst["value"] = heapq.heappop(heap)[0]
-		end = time.time()
-		HEAP_TIME +=end-start
 
-	read_sentences(schema, lambda x : compareValue(docPositive, docNegative, x, heap, model, fieldsToCompare, similarityCache, worst, validWords), "Searching")
+	read_sentences(schema, lambda x : compareValue(docPositive, docNegative, x, heap, model, fieldsToCompare, similarityCache, worst), True)
 	ret = []
 	for i in xrange(0, numResults):
 		ret.append(heapq.heappop(heap))
 	ret.reverse()
-
-	print "Doc cmp time"
-	print CMP_DOCS_TIME
-	print "Convert time"
-	print CONVERT_TIME
-	print "Heap time"
-	print HEAP_TIME
-	print "GenSim vec similarity time"
-	print GENSIM_SIMILARITY_TIME
-	print "Mat Write time"
-	print MAT_WRITE_TIME
-	print "Matrix construction time"
-	print MAT_COMPUTATION_TIME
-	print "Hungarian time"
-	print HUNGARIAN_TIME
-
-
-	
-
 	return ret
 
 
@@ -438,6 +392,13 @@ if __name__ == '__main__':
 		# otherwise compute it:
 		model = train_model(schema, 50)
 
+	# check if search sentences have been made :
+	try:
+		# try loading model
+		open(search_sentence_file_path(schema), "r")
+	except:
+		# build sentence dump if load fails:
+		build_search_sentences(schema)
 
 	# run the point cloud search:
 	start1 = time.time();
