@@ -1,4 +1,7 @@
 import pylab
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import proj3d
+
 import json
 import numpy as np
 import os
@@ -7,15 +10,11 @@ import csv
 from gensim.models.word2vec import *
 import nltk
 from scipy.stats import scoreatpercentile
-from nltk.stem import PorterStemmer
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import proj3d
 import hungarian
 import heapq
 
 FIELD_TYPE_NUMERIC = "numeric"
 FIELD_TYPE_TEXT = "text"
-STEMMER = PorterStemmer()
 
 
 ### Functions for computing percentiles on a single value or over an entire schema ####
@@ -98,7 +97,7 @@ def read_csv_as_key_values(csv_path, callback, updateStr = None, updateModulo = 
 			else:
 				keyValue = {}
 				for field in fields:
-					value = row[fields[field]]
+					value = ''.join([x for x in row[fields[field]] if ord(x) < 128])
 					keyValue[field] = value
 				callback(keyValue)
 				num += 1
@@ -157,6 +156,7 @@ def build_search_sentences(schema):
 				words = generate_field_features(schema, key, keyValue[key])
 				if(len(words)):
 					sentencesByKey[key] = filter( lambda x : x in validWords, words)
+			sentencesByKey["original_data"] = keyValue
 			output.write(json.dumps(sentencesByKey)+"\n")
 			
 		read_csv_as_key_values(schema["dataset_path"], lambda x : processKeyValue(x, output, schema, validWords), "reading")
@@ -217,11 +217,10 @@ def generate_field_features(schema, field, value):
 	if not field in schema["fields"]:
 		return []
 
-	global STEMMER
 	if(schema["fields"][field]["type"] == FIELD_TYPE_NUMERIC):
 		return [field + "_" + str(compute_percentile(float(value), schema["fields"][field]["percentile"]))+"_percentile", field+"_"+str(value)+"_value"]
 	else:
-		rawWords = map(lambda x : STEMMER.stem(x.lower()) , nltk.word_tokenize(value))
+		rawWords = map(lambda x : x.lower() , nltk.word_tokenize(value))
 		featuresNonUnicode = []
 		for word in rawWords:
 			try:
@@ -317,7 +316,7 @@ def compare_docs(sentenceA, sentenceB, model, similarityCache, worstInQueue):
 	return total
 
 
-def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, validWords, fieldsToCompare = None, numResults = 1):
+def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, validWords, fieldsToCompare = None, numResults = 10):
 	"""
 	Point cloud search algoirthm. Given two key_value documents (positiveDoc, negativeDoc) it finds documents
 	similar to positive while also being dissimilar to negative.
@@ -338,14 +337,16 @@ def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, validWords, 
 		docPositive = convert_key_value_to_sentence(schema, doc, fieldsToCompare)
 	else:
 		docPositive = positiveDoc
+		docPositive = filter(lambda x : x in validWords, docPositive)
 
 	if type(negativeDoc) == type({}):
 		docNegative = convert_key_value_to_sentence(schema, doc, fieldsToCompare)
 	else:
 		docNegative = negativeDoc
+		docNegative = filter(lambda x : x in validWords, docNegative)
 
-	docPositive = filter(lambda x : x in validWords, docPositive)
-	docNegative = filter(lambda x : x in validWords, docNegative)
+	
+	
 
 	# build a search queue using heapq
 	heap = []
@@ -407,21 +408,14 @@ if __name__ == '__main__':
 		start1 = time.time();
 		pos = raw_input("Positive features?").split()
 		neg = raw_input("Negative features?").split()
-		fields = raw_input("Fields (Leave empty to see all fields)?").split()
+		
 		ret = run_point_cloud_search(pos, neg, schema, model, validWords)
 		start2 = time.time();
 
 		print "Total Time"
 		print str(start2-start1)
-		if(len(fields)):
-			for val in ret:
-				for field in fields:
-					print field + ":"
-					print val[field]
-
-		else:
-			for val in ret:
-				print ret
+		for val in ret:
+			print val[1]["original_data"]
 
 """
 xs = []
