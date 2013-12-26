@@ -303,7 +303,6 @@ def compare_docs(sentenceA, sentenceB, model, similarityCache, worstInQueue):
 				mostSimilar = similarityVal
 			mat[i][j] = -similarityVal; # cost is inverse of similarity
 
-	return 0
 	# early abort hungarian if there is no way we are in the top k:
 	if(mostSimilar and mostSimilar * len(shorter) < worstInQueue):
 		return -1
@@ -318,7 +317,7 @@ def compare_docs(sentenceA, sentenceB, model, similarityCache, worstInQueue):
 	return total
 
 
-def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, fieldsToCompare = None, numResults = 100):
+def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, validWords, fieldsToCompare = None, numResults = 1):
 	"""
 	Point cloud search algoirthm. Given two key_value documents (positiveDoc, negativeDoc) it finds documents
 	similar to positive while also being dissimilar to negative.
@@ -344,6 +343,9 @@ def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, fieldsToComp
 		docNegative = convert_key_value_to_sentence(schema, doc, fieldsToCompare)
 	else:
 		docNegative = negativeDoc
+
+	docPositive = filter(lambda x : x in validWords, docPositive)
+	docNegative = filter(lambda x : x in validWords, docNegative)
 
 	# build a search queue using heapq
 	heap = []
@@ -400,12 +402,26 @@ if __name__ == '__main__':
 		build_search_sentences(schema)
 
 	# run the point cloud search:
-	start1 = time.time();
-	ret = run_point_cloud_search(["Reported_Minimum_100.0_percentile","children","child"], ["bomb", "car"], schema, model)
-	start2 = time.time();
+	validWords = map (lambda x : x.rstrip().split(" ")[0], open(weight_matrix_path(schema), "r").readlines())
+	while True:
+		start1 = time.time();
+		pos = raw_input("Positive features?").split()
+		neg = raw_input("Negative features?").split()
+		fields = raw_input("Fields (Leave empty to see all fields)?").split()
+		ret = run_point_cloud_search(pos, neg, schema, model, validWords)
+		start2 = time.time();
 
-	print "Total Time"
-	print str(start2-start1)
+		print "Total Time"
+		print str(start2-start1)
+		if(len(fields)):
+			for val in ret:
+				for field in fields:
+					print field + ":"
+					print val[field]
+
+		else:
+			for val in ret:
+				print ret
 
 """
 xs = []
