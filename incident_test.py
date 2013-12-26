@@ -41,6 +41,9 @@ Example Schema:
 
 ### Functions for computing percentiles on a single value or over an entire schema ####
 
+def convert_to_float(strValue):
+	return float(strValue.replace(",", ""))
+
 def compute_percentile(value, cutoffs):
 	"""
 	Given a value and a set of cutoffs returns the percentile within which the value lies
@@ -58,6 +61,7 @@ def compute_percentile(value, cutoffs):
 	return 100.0
 
 def compute_schema_percentiles(schema):
+
 	"""
 	Given a schema with a dataset this function reads in the numeric fields and computes
 	the percentile cutoffs for the numerric fields. It appends this information to the schema
@@ -66,7 +70,6 @@ def compute_schema_percentiles(schema):
 	:return a schema with percentiles filled for each numeric field
 	"""
 	values = {}
-	csv_path = schema["dataset_path"]
 	schemaFields = schema["fields"]
 	for field in schemaFields:
 		if schemaFields[field]["type"] == FIELD_TYPE_NUMERIC:
@@ -76,10 +79,10 @@ def compute_schema_percentiles(schema):
 		# cache the values for numerics
 		for field in schemaFields:
 			if schemaFields[field]["type"] == FIELD_TYPE_NUMERIC:
-				values[field].append(float(row[field]))
+				values[field].append(convert_to_float(row[field]))
 
-	read_csv_as_key_values(csv_path, lambda x: processRow(x, schemaFields, values))
-
+	read_dataset_as_key_values(schema, lambda x: processRow(x, schemaFields, values))
+	NUM_BUCKETS = 10
 	# compute percentiles
 	for field in values:
 		theList = np.array(values[field])
@@ -87,9 +90,9 @@ def compute_schema_percentiles(schema):
 		oneSidedList = theList[:]
 		oneSidedList[theList < theMedian] = 2*theMedian - theList[theList < theMedian]
 		percentiles = []
-		for i in xrange(0, 10):
-			percentile =  10 * i
-			a = scoreatpercentile(oneSidedList, percentile) - theMedian
+		for i in xrange(0, NUM_BUCKETS):
+			percentile =  100 * (i / float(NUM_BUCKETS))
+			a = scoreatpercentile(oneSidedList, percentile)
 			percentiles.append(a)
 		schemaFields[field]["percentile"] = percentiles
 	schema["fields"] = schemaFields
@@ -97,7 +100,7 @@ def compute_schema_percentiles(schema):
 
 ### Functions for reading csv format data ####
 
-def read_csv_as_key_values(csv_path, callback, updateStr = None, updateModulo = 1000):
+def read_dataset_as_key_values(schema, callback,  updateStr=None, updateModulo = 1000):
 	"""
 	Reads in the csv at csv_path. The first row is assumed to be keys 
 	callback is called with a dictionary with keys corresponding to column names 
@@ -107,10 +110,15 @@ def read_csv_as_key_values(csv_path, callback, updateStr = None, updateModulo = 
 	:param updateStr: (optional) a string that will display as the file reads each row
 	:param updateModulo: (optional) the number of rows to skip before showing the message
 	"""
+	csv_path = schema["dataset_path"]
+	if "delimiter" in schema:
+		delimiterStr = '\t'
+	else:
+		delimiterStr = ","
 	fields = None
 	num = 0
 	with open(csv_path, 'rU') as csvfile:
-		reader = csv.reader(csvfile, delimiter=',', quotechar='"')
+		reader = csv.reader(csvfile, delimiter=delimiterStr, quotechar='"')
 		for row in reader:
 			if not fields:
 				fields = {}
@@ -166,7 +174,7 @@ def build_sentences(schema):
 					sentencesByKey[key] = words
 			output.write(json.dumps(sentencesByKey)+"\n")
 			
-		read_csv_as_key_values(schema["dataset_path"], lambda x : processKeyValue(x, output, schema), "reading")
+		read_dataset_as_key_values(schema, lambda x : processKeyValue(x, output, schema), "reading")
 
 def build_search_sentences(schema):
 	# build list of validWords in model:
@@ -181,7 +189,7 @@ def build_search_sentences(schema):
 			sentencesByKey["original_data"] = keyValue
 			output.write(json.dumps(sentencesByKey)+"\n")
 			
-		read_csv_as_key_values(schema["dataset_path"], lambda x : processKeyValue(x, output, schema, validWords), "reading")
+		read_dataset_as_key_values(schema, lambda x : processKeyValue(x, output, schema, validWords), "reading")
 ### functions for getting paths for various generated files from within the schema ###
 
 def model_path(schema):
@@ -240,7 +248,7 @@ def generate_field_features(schema, field, value):
 		return []
 
 	if(schema["fields"][field]["type"] == FIELD_TYPE_NUMERIC):
-		return [field + "_" + str(compute_percentile(float(value), schema["fields"][field]["percentile"]))+"_percentile", field+"_"+str(value)+"_value"]
+		return [field + "_" + str(compute_percentile(convert_to_float(value), schema["fields"][field]["percentile"]))+"_percentile"]
 	else:
 		rawWords = map(lambda x : x.lower() , nltk.word_tokenize(value))
 		featuresNonUnicode = []
@@ -274,7 +282,7 @@ def train_model(schema, vectorSize, fieldsToRead = None):
 	print "Training Model..."
 	modelPath = model_path(schema)
 	weightMatrixPath = weight_matrix_path(schema)
-	model = Word2Vec(sentences, size=vectorSize, window=5, min_count=5, workers=4)
+	model = Word2Vec(sentences, size=vectorSize, window=5, min_count=1, workers=4)
 	model.save(modelPath)
 	model.save_word2vec_format(weightMatrixPath)
 	print "Finished training"
@@ -368,7 +376,8 @@ def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, validWords, 
 		docNegative = filter(lambda x : x in validWords, docNegative)
 
 	
-	
+	print "Similar words:"
+	print model.most_similar(docPositive, docNegative)
 
 	# build a search queue using heapq
 	heap = []
@@ -417,7 +426,7 @@ if __name__ == '__main__':
 		model =  Word2Vec.load_word2vec_format(weight_matrix_path(schema), binary=False)
 	except:
 		# otherwise compute it:
-		model = train_model(schema, 50)
+		model = train_model(schema, 100)
 
 	# check if search sentences have been made :
 	try:
@@ -433,8 +442,8 @@ if __name__ == '__main__':
 		start1 = time.time();
 		pos = raw_input("Positive features?").split()
 		neg = raw_input("Negative features?").split()
-		
-		ret = run_point_cloud_search(pos, neg, schema, model, validWords)
+
+		ret = run_point_cloud_search(pos, neg, schema, model, validWords, None, 10)
 		start2 = time.time();
 
 		for val in ret:
@@ -442,7 +451,7 @@ if __name__ == '__main__':
 			keyvals = val[1]["original_data"]
 			for key in keyvals:
 				if key in schema["fields"] and schema["fields"][key]["type"] == "numeric":
-					print key + " : " + str(keyvals[key]) + " (" + str(compute_percentile(float(keyvals[key]),schema["fields"][key]["percentile"])) + " percentile)"
+					print key + " : " + str(keyvals[key]) + " (" + str(compute_percentile(convert_to_float(keyvals[key]),schema["fields"][key]["percentile"])) + " percentile)"
 				else:
 					print key + " : " + str(keyvals[key])
 			print "Score : " + str(val[0])

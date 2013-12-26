@@ -12,6 +12,9 @@
 		}, 
 		"Reported_Minimum":{
 			"type" : "numeric"
+		}, 
+		"Reported_Maximum":{
+			"type" : "numeric"
 		}
 	}
 }
