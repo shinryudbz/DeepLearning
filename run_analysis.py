@@ -359,7 +359,7 @@ def compare_docs(sentenceA, sentenceB, model, similarityCache, worstInQueue):
 		
 	for i in xrange(0, lS):
 		for j in xrange(0,n):
-			mat[i][j] = computeKernel(i,j,state)
+			mat[i,j] = computeKernel(i,j,state)
 
 	# early abort hungarian if there is no way we are in the top k:
 	if(mostSimilar and mostSimilar * len(shorter) < worstInQueue):
