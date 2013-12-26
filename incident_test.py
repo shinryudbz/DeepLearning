@@ -10,10 +10,8 @@ from scipy.stats import scoreatpercentile
 from nltk.stem import PorterStemmer
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import proj3d
-import Queue
 import hungarian
 import heapq
-import threading
 
 FIELD_TYPE_NUMERIC = "numeric"
 FIELD_TYPE_TEXT = "text"
@@ -132,54 +130,6 @@ def read_sentences(schema, callback, search_sentences = False, update_message=No
 			if(update_message and i%1000 == 0):
 				print update_message + " " +  str(i)
 
-def read_sentences_parallel(schema, callback, search_sentences = False):
-	"""
-	Reads the sentences for the given schema and passes them back to the callback function
-	in the object given to the callback each field (key) maps to a set of sentences
-	:param schema: the dataset schemaFields
-	:param callback: the function which receives the sentences read
-	"""
-
-
-	if(search_sentences):
-		path = search_sentence_file_path(schema)
-	else:
-		path = sentence_file_path(schema)
-
-
-	def worker(state):
-		while True:
-			try:
-				callback, data = state["jobs"].get(True, 1)
-				callback(data)
-				state["jobs"].task_done()
-			except Queue.Empty:
-				break
-
-	thread_count = 4
-	state = {
-		"num_left" : None,
-		"lock" : threading.Lock(),
-		"jobs" : Queue.Queue()
-	}
-
-	for i in range(thread_count):
-	    t = threading.Thread(target=worker, args = (state,))
-	    t.start()
-	    
-	with open(path, "r") as f:
-		i = 0
-		while True:
-			l = f.readline()
-			i = i+1
-			if not l:
-				break
-			parsed = json.loads(l.rstrip())
-			# add to the work queue:
-			state["jobs"].put((callback, parsed))
-
-	state["jobs"].join()
-	
 
 def build_sentences(schema):
 	"""
@@ -413,7 +363,7 @@ def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, fieldsToComp
 		if len(heap) > numResults:
 			worst["value"] = heapq.heappop(heap)[0]
 
-	read_sentences_parallel(schema, lambda x : compareValue(docPositive, docNegative, x, heap, model, fieldsToCompare, similarityCache, worst), True)
+	read_sentences(schema, lambda x : compareValue(docPositive, docNegative, x, heap, model, fieldsToCompare, similarityCache, worst), True)
 	ret = []
 	for i in xrange(0, numResults):
 		ret.append(heapq.heappop(heap))
