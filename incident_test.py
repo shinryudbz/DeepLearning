@@ -247,7 +247,7 @@ HUNGARIAN_TIME = 0
 GENSIM_SIMILARITY_TIME = 0
 MAT_WRITE_TIME = 0
 ## method for comparing and searching documents
-def compare_docs(sentenceA, sentenceB, model, similarityCache, worstInQueue):
+def compare_docs(sentenceA, sentenceB, model, similarityCache, worstInQueue, validWords):
 	global MAT_COMPUTATION_TIME
 	global HUNGARIAN_TIME
 	global GENSIM_SIMILARITY_TIME
@@ -279,32 +279,32 @@ def compare_docs(sentenceA, sentenceB, model, similarityCache, worstInQueue):
 	mat =  np.zeros((n, n))
 	mat.fill(MAX_VAL)
 	mostSimilar = None
-	start = time.time()
+	
 	for i in xrange(0, lS):
 		for j in xrange(0,n):
+			start = time.time()
 			key = (shorter[i], longer[j])
-			similarityVal = None
-			if(not key in similarityCache):
+			similarityVal = 0
+			try:
+				similarityVal = similarityCache[key]
+			except:
+				# TODO: GET RID OF TRY - CATCH!
 				try:
-					start1 = time.time()
 					similarityVal = model.similarity(shorter[i], longer[j])
-					end1 = time.time()
-					GENSIM_SIMILARITY_TIME += end1-start1
 				except:
 					similarityVal = 0.0
 				similarityCache[key] = similarityVal
-			else:
-				similarityVal = similarityCache[key]
 			if (not mostSimilar or similarityVal > mostSimilar):
 				mostSimilar = similarityVal
-			start2 = time.time()
-			mat[i][j] = abs(1.0 / (similarityVal + 1.0)) # cost value is 1/similarity value
-			end2 = time.time()
-			MAT_WRITE_TIME += end2-start2
-	end = time.time()
+			end = time.time()
 
-	MAT_COMPUTATION_TIME += end-start
-
+			start1 = time.time()
+			mat[i][j] = -similarityVal; # cost is inverse of similarity
+			end1 = time.time()
+			MAT_WRITE_TIME += end1-start1
+			
+			MAT_COMPUTATION_TIME += end-start
+	return 0
 	# early abort hungarian if there is no way we are in the top k:
 	if(mostSimilar and mostSimilar * len(shorter) < worstInQueue):
 		return -1
@@ -357,12 +357,15 @@ def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, fieldsToComp
 	else:
 		docNegative = negativeDoc
 	
+	# build list of validWords in model:
+	validWords = map (lambda x : x.rstrip().split(" ")[0], open(weight_matrix_path(schema), "r").readlines())
+
 	# build a search queue using heapq
 	heap = []
 	similarityCache = {}
 	worst = { "value" : None }
 	# scan through dataset
-	def compareValue(docPositive, docNegative, docToCompare, heap, model, fieldsToCompare, similarityCache, worst):
+	def compareValue(docPositive, docNegative, docToCompare, heap, model, fieldsToCompare, similarityCache, worst, validWords):
 		global CONVERT_TIME
 		global CMP_DOCS_TIME
 		global HEAP_TIME
@@ -372,9 +375,9 @@ def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, fieldsToComp
 		CONVERT_TIME += end-start
 		
 		start = time.time()
-		score = compare_docs(docPositive, docToCompareFiltered, model, similarityCache, worst["value"])
+		score = compare_docs(docPositive, docToCompareFiltered, model, similarityCache, worst["value"], validWords)
 		if(docNegative):
-			score -= compare_docs(docNegative, docToCompareFiltered, model, similarityCache, worst["value"])
+			score -= compare_docs(docNegative, docToCompareFiltered, model, similarityCache, worst["value"], validWords)
 		end = time.time()
 		CMP_DOCS_TIME += end-start
 
@@ -388,7 +391,7 @@ def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, fieldsToComp
 		end = time.time()
 		HEAP_TIME +=end-start
 
-	read_sentences(schema, lambda x : compareValue(docPositive, docNegative, x, heap, model, fieldsToCompare, similarityCache, worst), "Searching")
+	read_sentences(schema, lambda x : compareValue(docPositive, docNegative, x, heap, model, fieldsToCompare, similarityCache, worst, validWords), "Searching")
 	ret = []
 	for i in xrange(0, numResults):
 		ret.append(heapq.heappop(heap))
