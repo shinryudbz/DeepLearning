@@ -441,7 +441,7 @@ def plot_schema_vectors(schema, model):
 	words = vectorList[:100]
 	
 	if(len(words[0]) != 2):
-		print "Vectors must be of dimension 2 to plot!"
+		print "Vectors must be of dimension 2 to plot! ... Aborting (vector dim is : " + str(len(words[0])) + ")"
 		return
 	xs = []
 	ys = []

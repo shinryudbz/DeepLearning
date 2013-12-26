@@ -1,5 +1,6 @@
 {
 	"dataset_path" : "iris.csv",
+	"vector_size" : 2,
 	"fields" : {
 		"Sepal_Length":{
 			"type" : "numeric"

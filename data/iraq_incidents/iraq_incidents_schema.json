@@ -1,6 +1,7 @@
 {
 	"dataset_path" : "iraq_incidents.csv",
 	"buckets" : 20,
+	"vector_size" : 100,
 	"fields" : {
 		"Location":{
 			"type" : "string"
