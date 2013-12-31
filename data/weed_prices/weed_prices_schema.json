@@ -1,0 +1,13 @@
+{
+	"dataset_path" : "weed_prices_data.csv",
+	"vector_size" : 2,
+	"buckets" : 20,
+	"fields" : {
+		"state": {
+			"type" : "string"
+		},
+		"ppg":{
+			"type" : "numeric"
+		}
+	}
+}

@@ -4,11 +4,11 @@ import json
 import numpy as np
 import os
 import time
+import scipy.spatial.distance
 import csv
 from gensim.models.word2vec import *
 import nltk
 from scipy.stats import scoreatpercentile
-import hungarian
 import heapq
 
 ## Defaults ##
@@ -75,7 +75,8 @@ def compute_schema_percentiles(schema):
 	for field in schemaFields:
 		if schemaFields[field]["type"] == FIELD_TYPE_NUMERIC:
 			values[field] = []
-	
+	if(len(values) == 0):
+		return schema
 	def processRow(row, schemaFields, values):
 		# cache the values for numerics
 		for field in schemaFields:
@@ -127,31 +128,34 @@ def read_dataset_as_key_values(schema, callback,  updateStr=None, updateModulo =
 			if not fields:
 				fields = {}
 				for i, field in enumerate(row):
+					field = field.strip()
 					fields[field] = i
 			else:
-				keyValue = {}
-				for field in fields:
-					value = ''.join([x for x in row[fields[field]] if ord(x) < 128])
-					keyValue[field] = value
-				callback(keyValue)
-				num += 1
-				if (updateStr and num % updateModulo == 0):
-					print updateStr + " " + str(num)
+				try:
+					keyValue = {}
+					for field in fields:
+						value = ''.join([x for x in row[fields[field]] if ord(x) < 128])
+						keyValue[field] = value
+					callback(keyValue)
+					num += 1
+					if (updateStr and num % updateModulo == 0):
+						print updateStr + " " + str(num)
+				except:
+					print "Invalid row"
+					print row
+					continue
 
 
 ### Functions for reading and writing sentences from a schema ####
 
-def read_sentences(schema, callback, search_sentences = False, update_message=None):
+def read_sentences(schema, callback, update_message=None):
 	"""
 	Reads the sentences for the given schema and passes them back to the callback function
 	in the object given to the callback each field (key) maps to a set of sentences
 	:param schema: the dataset schemaFields
 	:param callback: the function which receives the sentences read
 	"""
-	if(search_sentences):
-		path = search_sentence_file_path(schema)
-	else:
-		path = sentence_file_path(schema)
+	path = sentence_file_path(schema)
 	with open(path, "r") as f:
 		i = 0
 		while True:
@@ -180,20 +184,6 @@ def build_sentences(schema):
 			
 		read_dataset_as_key_values(schema, lambda x : processKeyValue(x, output, schema), "reading")
 
-def build_search_sentences(schema):
-	# build list of validWords in model:
-	validWords = map (lambda x : x.rstrip().split(" ")[0], open(weight_matrix_path(schema), "r").readlines())
-	with open(search_sentence_file_path(schema), "w") as output:
-		def processKeyValue(keyValue, output, schema, validWords):
-			sentencesByKey = {}
-			for key in keyValue:
-				words = generate_field_features(schema, key, keyValue[key])
-				if(len(words)):
-					sentencesByKey[key] = filter( lambda x : x in validWords, words)
-			sentencesByKey["original_data"] = keyValue
-			output.write(json.dumps(sentencesByKey)+"\n")
-			
-		read_dataset_as_key_values(schema, lambda x : processKeyValue(x, output, schema, validWords), "reading")
 ### functions for getting paths for various generated files from within the schema ###
 
 def model_path(schema):
@@ -204,10 +194,6 @@ def weight_matrix_path(schema):
 
 def sentence_file_path(schema):
 	return os.path.join(DEFAULT_BASE_PATH, os.path.dirname(schema["dataset_path"]), os.path.basename(schema["dataset_path"].split(".")[0] + "_sentences.out"))
-
-def search_sentence_file_path(schema):
-	return os.path.join(DEFAULT_BASE_PATH, os.path.dirname(schema["dataset_path"]), os.path.basename(schema["dataset_path"].split(".")[0] + "_search_sentences.out"))
-
 
 
 ### functions for manipulating a piece of raw data into sentences ###
@@ -264,6 +250,14 @@ def generate_field_features(schema, field, value):
 				continue
 		return featuresNonUnicode
 
+def transpose_sentences(sentences):
+	seen  = {}
+	for i, sentence in enumerate(sentences):
+		for word in sentence:
+			if not word in seen:
+				seen[word] = []
+			seen[word].append("sentence_"+str(i))
+	return seen.values()
 
 ### methods for training a model ###
 def train_model(schema,fieldsToRead = None):
@@ -291,157 +285,46 @@ def train_model(schema,fieldsToRead = None):
 	print "Training Model..."
 	modelPath = model_path(schema)
 	weightMatrixPath = weight_matrix_path(schema)
+	sentences = transpose_sentences(sentences)
 	model = Word2Vec(sentences, size=vectorSize, window=5, min_count=1, workers=4)
 	model.save(modelPath)
 	model.save_word2vec_format(weightMatrixPath)
 	print "Finished training"
 	return model
 
-## method for comparing and searching documents
-def compare_docs(sentenceA, sentenceB, model, similarityCache, worstInQueue):
-	"""
-	Document comparison algorithm
-	Given  documents A,B and |A|<|B|
-	assign an edge between all points in A to all points in B with weight = 1 / similarity(p1,p2)
-	run hungarian algorithm to find maximal matching (this yields a subset of A's points)
-	:param sentenceA: a sentence of words that are contained in the model
-	:param sentenceB: another sentence of words that are contained in the model
-	:param model: a Word2Vec model
-	:return sum of weights as score
-	"""
-	MAX_VAL = 999999
-	lA = len(sentenceA)
-	n = max(lA, len(sentenceB))
+def compute_similarity(model, word, positives, negatives=[]):
+	vec1 = np.array(model[word])
+	score = 0
+	for p in positives:
+		vec2 = np.array(model[p])
+		score +=  1.0 / len(positives) *  np.linalg.norm(vec2-vec1)
 
-	if(lA < n):
-		shorter = sentenceA
-		longer = sentenceB
-	else:
-		shorter = sentenceB
-		longer = sentenceA
+	for n in negatives:
+		vec2 = np.array(model[n])
+		score -= 1.0 / len(negatives) * np.linalg.norm(vec2-vec1)
 	
-	lS = len(shorter)
+	return score
 
-	# compute distance matrix from A => B
-	mat =  np.zeros((n, n))
-	mat.fill(MAX_VAL)
-	mostSimilar = None
-	
-
-	def computeKernel(i,j, state):
-		shorter = state["shorter"]
-		longer = state["longer"]
-		model = state["model"]
-		similarityCache = state["similarityCache"]
-
-		key = (shorter[i], longer[j])
-		similarityVal = 0
-		try:
-			similarityVal = similarityCache[key]
-		except:
-			# TODO: GET RID OF TRY - CATCH!
-			similarityVal = model.similarity(shorter[i], longer[j])
-			similarityCache[key] = similarityVal
-		return -similarityVal
-	
-	i, j = np.ix_(np.arange(lS), np.arange(n))
-	state = {
-		"shorter" : shorter,
-		"longer" : longer,
-		"model" : model,
-		"similarityCache" : similarityCache
-	};
-	
-
-#	f = np.vectorize(computeKernel, excluded=['state'])
-#	mat[:lS] = f(i, j, state)
-
-		
-	for i in xrange(0, lS):
-		for j in xrange(0,n):
-			mat[i,j] = computeKernel(i,j,state)
-
-	# early abort hungarian if there is no way we are in the top k:
-	if(mostSimilar and mostSimilar * len(shorter) < worstInQueue):
-		return -1
-	# run hungarian algorithm on cost matrix
-	matches = hungarian.lap(mat)[0]
-
-	# sum over minimal distance matching
-	total = 0
-	for i in xrange(0, len(shorter)):
-		key = (shorter[i], longer[matches[i]])
-		total += similarityCache[key];
-	return total
-
-
-def run_point_cloud_search(positiveDoc, negativeDoc, schema, model, validWords, fieldsToCompare = None, numResults = 10):
-	"""
-	Point cloud search algoirthm. Given two key_value documents (positiveDoc, negativeDoc) it finds documents
-	similar to positive while also being dissimilar to negative.
-	:param positiveDoc: a json document which is "positive"
-	:param negativeDoc: a json document which is "negative"
-	:param schema: a schema for the dataset
-	:param model: a Word2Vec model
-	:param fieldsToCompare: (optional) fields to compare within the json doc
-	:param numResults: (optional) number of results to return
-	:return list of best matches
-	"""
-
-	if not fieldsToCompare:
-		fieldsToCompare = schema["fields"].keys()
-	# convert to sentence if doc is not a sentence
-	
-	if type(positiveDoc) == type({}):
-		docPositive = convert_key_value_to_sentence(schema, doc, fieldsToCompare)
-	else:
-		docPositive = positiveDoc
-		docPositive = filter(lambda x : x in validWords, docPositive)
-
-	if type(negativeDoc) == type({}):
-		docNegative = convert_key_value_to_sentence(schema, doc, fieldsToCompare)
-	else:
-		docNegative = negativeDoc
-		docNegative = filter(lambda x : x in validWords, docNegative)
-
-	
-	print "Similar words:"
-	print model.most_similar(docPositive, docNegative)
-
-	# build a search queue using heapq
+def most_similar(wordList, model, positives, negatives = None, numToReturn=100):
 	heap = []
-	similarityCache = {}
-	worst = { "value" : None }
-	# scan through dataset
-	def compareValue(docPositive, docNegative, docToCompare, heap, model, fieldsToCompare, similarityCache, worst):
-		docToCompareFiltered = merge_sentences_to_single_sentence(docToCompare, fieldsToCompare)
-		score = compare_docs(docPositive, docToCompareFiltered, model, similarityCache, worst["value"])
-		if(docNegative):
-			score -= compare_docs(docNegative, docToCompareFiltered, model, similarityCache, worst["value"])
-
-		if(worst["value"] == None or (worst["value"] < score)):
-			heapq.heappush(heap, (score,docToCompare))
-		
-		# pop the lowest score if we've gotten too many items
-		if len(heap) > numResults:
-			worst["value"] = heapq.heappop(heap)[0]
-
-	read_sentences(schema, lambda x : compareValue(docPositive, docNegative, x, heap, model, fieldsToCompare, similarityCache, worst), True)
+	for word in wordList:
+		score = compute_similarity(model, word, positives, negatives)
+		heapq.heappush(heap, (score,word))
 	ret = []
-	for i in xrange(0, numResults):
+
+	while(len(heap) > 0 and len(ret) < numToReturn):
 		ret.append(heapq.heappop(heap))
-	ret.reverse()
 	return ret
 
 def plot_schema_vectors(schema, model):
 	"""
 	Plots the first 100 word vectors for the given model
 	"""
-	vectorList = map(lambda x : x.rstrip().split(' ')[0], open(weight_matrix_path(schema), "r").readlines())
-	words = vectorList[:100]
+	vectorList = map(lambda x : x.rstrip().split(' ')[0], open(weight_matrix_path(schema), "r").readlines())[1:]
+	words = vectorList[:500]
 	
-	if(len(words[0]) != 2):
-		print "Vectors must be of dimension 2 to plot! ... Aborting (vector dim is : " + str(len(words[0])) + ")"
+	if(len(model[words[0]]) != 2):
+		print "Vectors must be of dimension 2 to plot! ... Aborting (vector dim is : " + str(len(model[words[0]])) + ")"
 		return
 	xs = []
 	ys = []
@@ -477,35 +360,50 @@ if __name__ == '__main__':
 
 	json_data = open(path).read()
 	schema = json.loads(json_data)
-	schema = compute_schema_percentiles(schema)
 
-	# check if sentence dump has been created:
-	try:
-		open(sentence_file_path(schema), "r")
-	except:
-		# build sentence dump if load fails:
-		build_sentences(schema)
+	print "Loading : " + path
+
+	print "Computing Schema Numeric Percentiles..."
+	schema = compute_schema_percentiles(schema)
+	print "Done"
 
 	# check if model has been trained:
 	try:
+		print "Loading model"
 		# try loading model
 		model =  Word2Vec.load_word2vec_format(weight_matrix_path(schema), binary=False)
+		print "Done"
 	except:
+		print "Need to build model..."
+		# check if sentence dump has been created:
+		try:
+			print "Loading training sentences"
+			open(sentence_file_path(schema), "r")
+		except:
+			# build sentence dump if load fails:
+			print "Need to build training sentences"
+			print "Building training sentences"
+			build_sentences(schema)
+			print "Done"
 		# otherwise compute it:
+		print "Training Model"
 		model = train_model(schema)
+		print "Done"
 
 	plot_schema_vectors(schema,model)
-	# check if search sentences have been made :
-	try:
-		# try loading model
-		open(search_sentence_file_path(schema), "r")
-	except:
-		# build sentence dump if load fails:
-		build_search_sentences(schema)
-
+	
 	# run the point cloud search:
-	validWords = map (lambda x : x.rstrip().split(" ")[0], open(weight_matrix_path(schema), "r").readlines())
+	print "Loading valid words"
+	validWords = map (lambda x : x.rstrip().split(" ")[0], open(weight_matrix_path(schema), "r").readlines())[1:]
 	while True:
+		pos = raw_input("Positive features?").split()
+		neg = raw_input("Negative features?").split()
+		ret = most_similar(validWords, model, pos, neg);
+		for r in ret:
+			print r
+		
+		print model.most_similar(pos, neg)
+"""
 		start1 = time.time();
 		pos = raw_input("Positive features?").split()
 		neg = raw_input("Negative features?").split()
@@ -524,3 +422,4 @@ if __name__ == '__main__':
 			print "Score : " + str(val[0])
 			print ""
 			print "------"
+"""

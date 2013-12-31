@@ -1,0 +1,40 @@
+{
+	"dataset_path" : "census_income2_data.csv",
+	"buckets" : 20,
+	"vector_size" : 100,
+	"fields" : {
+		"age": {
+			"type" : "numeric"
+		},
+		"education": {
+			"type" : "string"
+		},
+		"education_num_years": {
+			"type" : "numeric"
+		},
+		"marital_status":{
+			"type" : "string"
+		},
+		"occupation":{
+			"type" : "string"
+		},
+		"race":{
+			"type" : "string"
+		},
+		"sex":{
+			"type" : "string"
+		},
+		"hours_per_week":{
+			"type" : "numeric"
+		},
+		"native_country":{
+			"type" : "string"
+		},
+		"hours_per_week":{
+			"type" : "numeric"
+		},
+		"makes_over_50k":{
+			"type" : "string"
+		}
+	}
+}
